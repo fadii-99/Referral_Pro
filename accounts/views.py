@@ -37,7 +37,7 @@ class SignupView(APIView):
     """Email/Password signup for Solo & Business users"""
     def post(self, request):
         import json
-        from utils.stripe_payment import create_stripe_payment_intent
+        from utils.stripe_payment import stripe_payment
         from .models import BusinessInfo
 
         # Handle both flat and nested payloads
@@ -59,6 +59,8 @@ class SignupView(APIView):
         # BUSINESS SIGNUP
         # -------------------
         if request.data.get('role') != 'solo':
+
+            print(data)
             # Default role = solo
             role = data.get("welcome", {}).get("role")
             print(role)
@@ -100,19 +102,38 @@ class SignupView(APIView):
             )
 
             # Now start Stripe payment (after DB records are stored)
-            # try:
-            #     amount = 100  # TODO: Replace with plan-based amount if needed
-            #     client_secret = create_stripe_payment_intent(amount)
-            # except Exception as e:
-            #     # Optionally: user.delete() and related business info if payment fails
-            #     return Response({"error": f"Stripe error: {str(e)}"}, status=500)
+            try:
+                # Get card details from request data
+                card_info = data.get("payment", {}).get("card", {})
+                card_number = card_info.get("number")
+                expiry = card_info.get("expiry", {}).get("mmYY", "")
+                exp_month, exp_year = (expiry.split("/") if "/" in expiry else (None, None))
+                cvc = card_info.get("cvv")
+                plan_name = str(data.get("subscription", {}).get("planId", "Business Plan"))
+                price = 100  # Or get from plan/price logic
+
+                # Validate card info
+                if not all([card_number, exp_month, exp_year, cvc]):
+                    return Response({"error": "Incomplete card details"}, status=400)
+
+                payment_details, payment_error = stripe_payment(
+                    card_number, exp_month, exp_year, cvc, price, plan_name, user.full_name
+                )
+
+                if not payment_details:
+                    # Optionally: user.delete() and related business info if payment fails
+                    return Response({"error": f"Stripe error: {payment_error}"}, status=500)
+
+            except Exception as e:
+                # Optionally: user.delete() and related business info if payment fails
+                return Response({"error": f"Stripe error: {str(e)}"}, status=500)
 
             tokens = get_tokens_for_user(user)
             return Response({
-                "message": "Business user registered successfully",
+                "message": "Business user registered and payment successful",
                 "user": {"email": user.email, "name": user.full_name, "role": user.role},
                 "tokens": tokens,
-                # "stripe_client_secret": client_secret
+                "payment": payment_details,
             }, status=200)
 
         # -------------------
@@ -151,6 +172,8 @@ class EmailPasswordLoginView(APIView):
             return Response({"error": "Email and password required"}, status=400)
 
         user = authenticate(request, email=email, password=password)
+        if not user:
+            return Response({"error": "Invalid credentials"}, status=401)
         # if not user or user.role != "solo":
         #     return Response({"error": "Invalid credentials or not a solo user"}, status=401)
 
@@ -285,9 +308,9 @@ class SendOTPView(APIView):
             if email:
                 send_otp(email, otp.code)
             else:
-                print(phone)
-                # twilio = TwilioService()
-                # twilio.send_sms(phone, otp.code)
+                # print(phone)
+                twilio = TwilioService()
+                twilio.send_sms(phone, otp.code)
             
             return Response({"message": f"OTP sent successfully to your {'email' if email else 'phone'}", "otp": otp.code}, status=200)
         except Exception as e:
@@ -299,6 +322,7 @@ class VerifyOTPView(APIView):
     authentication_classes = []
 
     def post(self, request):
+        print(request.data)
         email = request.data.get('email')
         otp_code = request.data.get('otp')
 
@@ -324,6 +348,7 @@ class VerifyOTPView(APIView):
         # Generate a temporary token for password reset
         temp_token = RefreshToken.for_user(user)
         temp_token.set_exp(lifetime=datetime.timedelta(minutes=10))  # Token expires in 10 minutes
+
 
         return Response({
             "message": "OTP verified successfully",

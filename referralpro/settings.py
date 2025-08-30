@@ -180,7 +180,7 @@ SOCIAL_AUTH_ALLOWED_REDIRECT_URIS = os.getenv('SOCIAL_AUTH_ALLOWED_REDIRECT_URIS
 # -------------------------
 # Security / CORS
 # -------------------------
-CORS_ALLOWED_ORIGINS = os.getenv("CORS_ALLOWED_ORIGINS", "").split(",")
+CORS_ALLOW_ALL_ORIGINS=True
 CORS_ALLOW_CREDENTIALS = os.getenv("CORS_ALLOW_CREDENTIALS", "True").lower() == "true"
 
 # SECURE_SSL_REDIRECT = os.getenv("SECURE_SSL_REDIRECT", "False").lower() == "true"
