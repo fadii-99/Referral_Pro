@@ -2,9 +2,9 @@ import random, datetime
 from django.utils import timezone
 from accounts.models import OtpCode
 
-def generate_otp(user, purpose="login", expiry_minutes=10):
+def generate_otp(user, purpose="login", expires_in=10):
     code = str(random.randint(100000, 999999))  # 6-digit OTP
-    expires_at = timezone.now() + datetime.timedelta(minutes=expiry_minutes)
+    expires_at = timezone.now() + datetime.timedelta(minutes=expires_in)
 
     otp = OtpCode.objects.create(
         user=user,
