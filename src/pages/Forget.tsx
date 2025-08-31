@@ -12,7 +12,6 @@ type ForgotForm = {
   email: string;
 };
 
-const digitsOnly = (v: string) => v.replace(/\D/g, "");
 
 const Forget: React.FC = () => {
   const navigate = useNavigate();
@@ -100,7 +99,7 @@ const Forget: React.FC = () => {
       <div className="md:col-span-3 flex items-center justify-center px-4">
         <div className="w-full max-w-lg">
           <div className="flex flex-col items-center gap-3 mb-8">
-            <h1 className="text-primary-blue font-semibold sm:text-4xt text-3xl">Forgot Password</h1>
+            <h1 className="text-primary-blue font-semibold sm:text-4xl text-3xl">Forgot Password</h1>
             <p className="text-xs text-gray-700 text-center">
               Enter your email to receive a reset code
             </p>

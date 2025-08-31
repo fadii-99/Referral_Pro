@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useContext, useMemo } from "react";
+import React, { useState, useEffect, useContext } from "react";
 import { useNavigate } from "react-router-dom";
 import SideDesign from "../components/SideDesign";
 import Button from "../components/Button";
@@ -36,9 +36,7 @@ const BusinessType: React.FC = () => {
   const { registrationData, setRegistrationData } = ctx;
 
   const isContractor = registrationData.profileType === "contractor";
-  const isCompany    = registrationData.profileType === "company";
 
-  const TOTAL_STEPS = useMemo(() => (isCompany ? 6 : 4), [isCompany]);
 
   const [type, setType] = useState<BizType>(registrationData.bizType);
   const [years, setYears] = useState(registrationData.years);
