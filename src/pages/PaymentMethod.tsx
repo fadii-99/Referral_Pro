@@ -1,12 +1,11 @@
-import React, { useContext, useEffect, useMemo, useState, useRef } from "react";
+// src/screens/PaymentMethod.tsx
+import React, { useContext, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import SideDesign from "../components/SideDesign";
 import Button from "../components/Button";
-import MultiStepHeader from "./../components/MultiStepHeader";
-
+import MultiStepHeader from "../components/MultiStepHeader";
 import { ToastContainer, toast } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
-
 import { RegistrationContext } from "../context/RegistrationProvider";
 
 const serverUrl = import.meta.env.VITE_SERVER_URL;
@@ -25,27 +24,25 @@ const toMMYY = (yyyyMM: string) => {
 const PaymentMethod: React.FC = () => {
   const navigate = useNavigate();
   const monthRef = useRef<HTMLInputElement>(null);
+
   const ctx = useContext(RegistrationContext);
   if (!ctx) throw new Error("Wrap your app with <RegistrationProvider /> first.");
-  const { registrationData, setRegistrationData } = ctx;
+  const { registrationData, finishSignup } = ctx;
 
-  const [cardName, setCardName] = useState(registrationData.cardName ?? "");
-  const [cardNumber, setCardNumber] = useState(registrationData.cardNumber ?? "");
-  const [expMonthValue, setExpMonthValue] = useState(registrationData.expMonthValue ?? "");
-  const [cvv, setCvv] = useState(registrationData.cvv ?? "");
+  const [cardName, setCardName] = useState("");
+  const [cardNumber, setCardNumber] = useState("");
+  const [expMonthValue, setExpMonthValue] = useState(""); 
+  const [cvv, setCvv] = useState("");
 
-  useEffect(() => {
-    setCardName(registrationData.cardName ?? "");
-    setCardNumber(registrationData.cardNumber ?? "");
-    setExpMonthValue(registrationData.expMonthValue ?? "");
-    setCvv(registrationData.cvv ?? "");
-  }, [registrationData]);
+  const [submitting, setSubmitting] = useState(false);
 
   const cardDigitsCount = useMemo(() => digitsOnly(cardNumber).length, [cardNumber]);
   const onChangeCardNumber = (val: string) => setCardNumber(formatCard(val));
   const onChangeCVV = (val: string) => setCvv(digitsOnly(val).slice(0, 3));
 
   const onSave: React.MouseEventHandler<HTMLButtonElement> = async () => {
+    if (submitting) return;
+
     const isStripe = registrationData.paymentType === "stripe";
     const isBank = registrationData.paymentType === "bank";
 
@@ -53,8 +50,6 @@ const PaymentMethod: React.FC = () => {
       toast.error("Please select a payment method (bank or stripe) on the previous step.");
       return;
     }
-
-    // Required for both bank & stripe
     if (!cardName.trim() || !cardNumber.trim() || !expMonthValue || !cvv.trim()) {
       toast.error("Please fill out card name, number, expiry and CVV.");
       return;
@@ -64,7 +59,9 @@ const PaymentMethod: React.FC = () => {
       return;
     }
     if (cvv.length !== 3) {
-      toast.error(cvv.length > 3 ? "CVV is too long (3 digits required)." : "CVV is too short (3 digits required).");
+      toast.error(
+        cvv.length > 3 ? "CVV is too long (3 digits required)." : "CVV is too short (3 digits required)."
+      );
       return;
     }
     if (!/^\d{4}-\d{2}$/.test(expMonthValue)) {
@@ -72,35 +69,17 @@ const PaymentMethod: React.FC = () => {
       return;
     }
 
-    const expForContext = toMMYY(expMonthValue);
-
-    // Persist into context
-    setRegistrationData((prev) => ({
-      ...prev,
-      cardName: cardName.trim(),
-      cardNumber: cardNumber.trim(),
-      expMonthValue,
-      exp: expForContext,
-      cvv,
-      // contractor/individual => force sole; company => keep as-is
-      bizType: prev.profileType === "company" ? prev.bizType : "sole",
-      companyName: prev.profileType === "company" ? prev.companyName : "",
-      industry: prev.profileType === "company" ? prev.industry : "",
-      employees: prev.profileType === "company" ? prev.employees : "",
-    }));
-
+    setSubmitting(true);
 
     try {
       const isCompany = registrationData.profileType === "company";
       const expMMYY = toMMYY(expMonthValue);
 
       const payload = {
-        // Step: Welcome
         welcome: {
           role: "Business",
           profileType: registrationData.profileType || "",
         },
-        // Step: Basic
         basic: {
           firstName: registrationData.firstName,
           lastName: registrationData.lastName,
@@ -108,14 +87,12 @@ const PaymentMethod: React.FC = () => {
           email: registrationData.email,
           ...(isCompany ? { companyName: registrationData.companyName } : {}),
         },
-        // Step: Business type
         businessType: {
           type: isCompany ? (registrationData.bizType || "sole") : "sole",
           years: registrationData.years,
           employees: registrationData.employees,
           usState: registrationData.usState,
         },
-        // Step: Company info (postal/contact)
         companyInfo: {
           address1: registrationData.address1,
           address2: registrationData.address2,
@@ -124,21 +101,19 @@ const PaymentMethod: React.FC = () => {
           phone: registrationData.phone,
           website: registrationData.website,
         },
-        // Step: Subscription (now includes USD price)
         subscription: {
-          billing: registrationData.subscriptionBilling, // "monthly" | "yearly" | ""
+          billing: registrationData.subscriptionBilling,
           planId:
             registrationData.subscriptionPlanId === null
               ? null
-              : Number(registrationData.subscriptionPlanId), // 0 | 1
+              : Number(registrationData.subscriptionPlanId),
           seats: Number(registrationData.subscriptionSeats),
           currency: registrationData.subscriptionCurrency || "USD",
-          total: Number(registrationData.subscriptionTotal || 0), // numeric total
-          totalDisplay: registrationData.subscriptionTotalDisplay || "", // e.g. "$99/mon"
+          total: Number(registrationData.subscriptionTotal || 0),
+          totalDisplay: registrationData.subscriptionTotalDisplay || "",
         },
-        // Step: Payment (also echo charge in USD for backend convenience)
         payment: {
-          paymentType: registrationData.paymentType, // "bank" | "stripe"
+          paymentType: registrationData.paymentType,
           charge: {
             currency: registrationData.subscriptionCurrency || "USD",
             total: Number(registrationData.subscriptionTotal || 0),
@@ -147,14 +122,10 @@ const PaymentMethod: React.FC = () => {
           card: {
             name: cardName.trim(),
             number: digitsOnly(cardNumber),
-            expiry: {
-              monthValue: expMonthValue, // "YYYY-MM"
-              mmYY: expMMYY, // "MM/YY"
-            },
+            expiry: { monthValue: expMonthValue, mmYY: expMMYY },
             cvv,
           },
         },
-        // Step: Password
         password: {
           value: registrationData.password || "",
         },
@@ -165,27 +136,34 @@ const PaymentMethod: React.FC = () => {
 
       const res = await fetch(`${serverUrl}/auth/sign_up/`, {
         method: "POST",
-        body: fd, // no headers
+        body: fd,
       });
 
-      
       const ct = res.headers.get("content-type") || "";
       const data = ct.includes("application/json") ? await res.json() : await res.text();
-      console.log(data.error);
 
       if (!res.ok) {
-        console.groupCollapsed(`Signup error ${res.status}`);
-        console.log(typeof data === "string" ? data : JSON.stringify(data, null, 2));
-        console.groupEnd();
-        throw new Error(`Payment submit failed (${res.status})`);
+        const msg =
+          (data && typeof data !== "string" && (data.error || data.detail || data.message)) ||
+          (typeof data === "string" ? data : "Payment submit failed");
+        toast.error(msg);
+        setSubmitting(false);
+        return;
       }
 
-      navigate("/Login");
-      console.groupCollapsed("Signup success");
-      console.log(typeof data === "string" ? data : JSON.stringify(data, null, 2));
-      console.groupEnd();
+      toast.success("Signup successful!");
+      setTimeout(() => {
+        finishSignup({ clear: true }); 
+        setCardName("");
+        setCardNumber("");
+        setExpMonthValue("");
+        setCvv("");
+        navigate("/Login", { replace: true });
+      }, 2000);
     } catch (e) {
+      console.error(e);
       toast.error("Something went wrong. Try again.");
+      setSubmitting(false);
     }
   };
 
@@ -198,13 +176,12 @@ const PaymentMethod: React.FC = () => {
       <div className="md:col-span-3 flex flex-col bg-[#F4F2FA]">
         <div className="sticky top-5 z-30 backdrop-blur w-full max-w-lg mx-auto">
           <div className="px-4">
-            <MultiStepHeader title="Payment Method" current={5} total={7} onBack={() => navigate(-1)} />
+            <MultiStepHeader title="Payment Method" current={6} total={6} onBack={() => navigate(-1)} />
           </div>
         </div>
 
         <div className="flex-1 flex items-center justify-center px-4">
           <div className="w-full max-w-lg">
-            {/* Card inputs (always visible now) */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
               <div>
                 <label className="block text-[11px] text-primary-blue font-semibold mb-2">Card Name</label>
@@ -252,11 +229,8 @@ const PaymentMethod: React.FC = () => {
                   onClick={() => {
                     const el = monthRef.current;
                     if (!el) return;
-                    if ((el as any).showPicker) {
-                      (el as any).showPicker();
-                    } else {
-                      el.focus();
-                    }
+                    if ((el as any).showPicker) (el as any).showPicker();
+                    else el.focus();
                   }}
                   role="button"
                   aria-label="Open expiry month picker"
@@ -266,7 +240,6 @@ const PaymentMethod: React.FC = () => {
                       <path d="M7 4v3M17 4v3M4 9h16M5 20h14a2 2 0 0 0 2-2v-9H3v9a2 2 0 0 0 2 2Z" />
                     </svg>
                   </span>
-
                   <input
                     ref={monthRef}
                     type="month"
@@ -307,26 +280,18 @@ const PaymentMethod: React.FC = () => {
               </div>
             </div>
 
-            {/* Stripe / Bank hint */}
             <p className="text-[11px] text-gray-500 text-center">
               {isStripe ? "Payments secured by Stripe" : "Bank transfer will be processed manually"}
             </p>
 
-            <Button text="Save & Continue" onClick={onSave} />
+            <Button text={submitting ? "Processing..." : "Save & Continue"} onClick={onSave} disabled={submitting} />
 
             <p className="mt-2 text-center text-[11px] text-gray-500">Terms of Service | Privacy Policy</p>
           </div>
         </div>
       </div>
 
-      <ToastContainer
-        position="top-right"
-        autoClose={2000}
-        hideProgressBar={false}
-        closeOnClick
-        pauseOnHover
-        draggable
-      />
+      <ToastContainer position="top-right" autoClose={2000} hideProgressBar={false} closeOnClick pauseOnHover draggable />
     </div>
   );
 };

@@ -21,7 +21,6 @@ const PLAN_META: Record<
 const money = (n: number) => `$${Math.round(n).toLocaleString()}`;
 const yearlyWithDiscount = (monthlyTotal: number) => Math.round(monthlyTotal * 12 * 0.9);
 
-/** compute displayed price (same math your cards use) and format */
 function computeTotals(plan: PlanKey, mode: Billing) {
   const meta = PLAN_META[plan];
   const cardBaseMonthly = Math.ceil(meta.monthlyPrice / meta.baseSeats) * meta.baseSeats - 1;
@@ -36,17 +35,14 @@ const SubscriptionPlan: React.FC = () => {
   if (!ctx) throw new Error("SubscriptionPlan must be used within RegistrationProvider");
   const { registrationData, setRegistrationData } = ctx;
 
-  // Tabs: billing
   const [billing, setBilling] = useState<Billing>(
     (registrationData.subscriptionBilling as Billing) || "monthly"
   );
 
-  // Plan selection (0/1) or null
   const [selectedPlanId, setSelectedPlanId] = useState<0 | 1 | null>(
     registrationData.subscriptionPlanId
   );
 
-  // Payment type selection ("bank" | "stripe" | "")
   const [paymentType, setPaymentType] = useState<"bank" | "stripe" | "">(
     registrationData.paymentType || ""
   );
@@ -60,14 +56,12 @@ const SubscriptionPlan: React.FC = () => {
     const meta = PLAN_META[plan];
     const cardBaseMonthly = Math.ceil(meta.monthlyPrice / meta.baseSeats) * meta.baseSeats - 1;
     return mode === "monthly" ? cardBaseMonthly : yearlyWithDiscount(cardBaseMonthly);
-    // (Pricing display only; selection stores plan id + seats)
   };
 
   const handleBillingSwitch = (mode: Billing) => {
     setBilling(mode);
 
     setRegistrationData((prev) => {
-      // if a plan is already selected, recompute totals and stash in context
       let next = { ...prev, subscriptionBilling: mode };
       if (selectedPlanId !== null) {
         const planKey: PlanKey = selectedPlanId === 0 ? "starter" : "growth";
@@ -81,7 +75,6 @@ const SubscriptionPlan: React.FC = () => {
       }
       return next;
     });
-    // NOTE: planId/Seats remain as-is; only billing switches as required
   };
 
   const handleSelectPlan = (plan: PlanKey) => {
@@ -92,10 +85,9 @@ const SubscriptionPlan: React.FC = () => {
 
     setRegistrationData((prev) => ({
       ...prev,
-      subscriptionBilling: billing, // current tab value
+      subscriptionBilling: billing,
       subscriptionPlanId: planId,
       subscriptionSeats: seats,
-      // NEW: store money in USD
       subscriptionCurrency: totals.currency,
       subscriptionTotal: totals.total,
       subscriptionTotalDisplay: totals.display,
@@ -111,7 +103,6 @@ const SubscriptionPlan: React.FC = () => {
   };
 
   const handleContinue: React.MouseEventHandler<HTMLButtonElement> = () => {
-    // Guard: non-selected by default; proceed only when both picked
     if (selectedPlanId === null || !paymentType) return;
     navigate("/PaymentMethod");
   };
@@ -127,7 +118,7 @@ const SubscriptionPlan: React.FC = () => {
         type="button"
         onClick={() => handleSelectPlan(id)}
         className={[
-          "relative w-full rounded-2xl px-5 py-6 text-left border transition-shadow",
+          "relative w-full rounded-2xl sm:px-5 px-3 sm:py-6 py-4 text-left border transition-shadow",
           selected
             ? "bg-primary-purple text-white border-primary-purple shadow-lg"
             : "bg-white text-primary-blue border-primary-blue/20 hover:shadow-md",
@@ -175,7 +166,7 @@ const SubscriptionPlan: React.FC = () => {
         type="button"
         onClick={() => handleSelectPayment(type)}
         className={[
-          "w-full rounded-xl px-4 py-3 border text-left transition-all",
+          "w-full rounded-xl sm:px-4 px-3 py-3 border text-left transition-all",
           selected
             ? "bg-white border-primary-purple ring-2 ring-primary-purple/30"
             : "bg-white border-primary-blue/20 hover:shadow-sm",
@@ -183,7 +174,7 @@ const SubscriptionPlan: React.FC = () => {
       >
         <div className="flex items-center justify-between">
           <div>
-            <div className="text-sm font-semibold text-primary-blue">{label}</div>
+            <div className="sm:text-sm text-xs font-semibold text-primary-blue">{label}</div>
             {helper ? (
               <div className="text-[11px] text-primary-blue/70 mt-0.5">{helper}</div>
             ) : null}
@@ -211,15 +202,14 @@ const SubscriptionPlan: React.FC = () => {
             <MultiStepHeader
               title="Subscription Plan"
               current={5}
-              total={7}
+              total={6}
               onBack={() => navigate(-1)}
             />
           </div>
         </div>
 
-        <div className="flex-1 flex items-center justify-center px-4">
+        <div className="flex-1 flex items-center justify-center px-4 sm:mt-0 mt-6">
           <div className="w-full max-w-lg">
-            {/* Billing Tabs */}
             <div className="flex items-center gap-6 text-sm font-semibold text-primary-blue mb-3">
               <button
                 type="button"
@@ -244,24 +234,21 @@ const SubscriptionPlan: React.FC = () => {
               </button>
             </div>
 
-            {/* Plan Cards */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="grid grid-cols-2 gap-4">
               <PlanCard id="starter" />
               <PlanCard id="growth" />
             </div>
 
-            {/* Payment Method */}
             <div className="mt-6">
               <div className="text-xs text-primary-blue font-semibold mb-2">
                 Payment method
               </div>
               <div className="grid grid-cols-2 gap-3">
-                <PaymentCard type="bank" label="Bank Transfer" helper="Manual/Invoice" />
-                <PaymentCard type="stripe" label="Stripe" helper="Card checkout" />
+                <PaymentCard type="bank" label="Bank Transfer" />
+                <PaymentCard type="stripe" label="Stripe"  />
               </div>
             </div>
 
-            {/* Quick Summary */}
             <div className="mt-6">
               <div className="text-xs text-primary-blue font-semibold mb-2">Your selection</div>
               <div className="grid grid-cols-2 gap-2 text-xs">

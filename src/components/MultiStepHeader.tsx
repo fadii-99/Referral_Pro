@@ -19,6 +19,7 @@ const MultiStepHeader: React.FC<Props> = ({ title, current, total, onBack, class
 
 
 
+  
   return (
     <header className={`w-full ${className ?? ""}`}>
      <div className="flex justify-center w-full">
@@ -65,6 +66,7 @@ const MultiStepHeader: React.FC<Props> = ({ title, current, total, onBack, class
           </button>
         </div>
 
+
         <div className="flex flex-col items-end w-full">
             <span className="justify-self-end text-xs md:text-sm text-gray-500 mb-1">
             {cur}/{total}
@@ -77,5 +79,6 @@ const MultiStepHeader: React.FC<Props> = ({ title, current, total, onBack, class
     </header>
   );
 };
+
 
 export default MultiStepHeader;

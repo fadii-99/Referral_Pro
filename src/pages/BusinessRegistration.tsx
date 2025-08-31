@@ -34,8 +34,9 @@ const BusinessRegistration: React.FC = () => {
   const [email, setEmail]             = useState(registrationData.email || "");
   const [industry, setIndustry]       = useState(registrationData.industry || "");
   const [companyName, setCompanyName] = useState(registrationData.companyName || "");
-
   const [open, setOpen] = useState(false);
+
+
 
   useEffect(() => {
     setFirstName(registrationData.firstName || "");
@@ -77,7 +78,7 @@ const BusinessRegistration: React.FC = () => {
             <MultiStepHeader
               title="Business Registration"
               current={1}
-              total={7}
+              total={6}
               onBack={() => navigate(-1)}
             />
           </div>
@@ -98,7 +99,7 @@ const BusinessRegistration: React.FC = () => {
                     </span>
                     <input
                       type="text"
-                      placeholder="Enter your first name"
+                      placeholder="Enter first name"
                       value={firstName}
                       onChange={(e) => setFirstName(e.target.value)}
                       className="w-full pl-12 pr-4 py-4 rounded-full bg-white border border-gray-200 text-xs md:text-sm
@@ -118,7 +119,7 @@ const BusinessRegistration: React.FC = () => {
                     </span>
                     <input
                       type="text"
-                      placeholder="Enter your last name"
+                      placeholder="Enter last name"
                       value={lastName}
                       onChange={(e) => setLastName(e.target.value)}
                       className="w-full pl-12 pr-4 py-4 rounded-full bg-white border border-gray-200 text-xs md:text-sm
@@ -181,24 +182,29 @@ const BusinessRegistration: React.FC = () => {
                   </span>
 
                   {open && (
-                    <ul className="absolute z-20 mt-2 w-full bg-white border border-gray-200 rounded-2xl shadow-lg overflow-hidden">
-                      {INDUSTRIES.map((opt) => (
-                        <li key={opt}>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setIndustry(opt);
-                              setOpen(false);
-                            }}
-                            className="w-full text-left px-4 py-2 text-sm hover:bg-primary-purple/5"
-                            aria-selected={industry === opt}
-                          >
-                            {opt}
-                          </button>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
+                      <ul
+                        className="absolute z-30 mt-2 w-full bg-white border border-gray-200 
+                                  rounded-2xl shadow-lg overflow-auto 
+                                  max-h-44 sm:max-h-60 text-[11px] sm:text-sm"
+                      >
+                        {INDUSTRIES.map((opt) => (
+                          <li key={opt}>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setIndustry(opt);
+                                setOpen(false);
+                              }}
+                              className="w-full text-left px-3 py-2 sm:px-4 sm:py-2.5 hover:bg-primary-purple/5"
+                              aria-selected={industry === opt}
+                            >
+                              {opt}
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+
                 </div>
               </div>
 

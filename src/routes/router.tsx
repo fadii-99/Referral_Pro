@@ -1,5 +1,5 @@
-import React, { lazy, Suspense } from 'react';
-import { createBrowserRouter, Navigate, Outlet } from 'react-router-dom';
+import  { lazy, Suspense } from 'react';
+import { createBrowserRouter } from 'react-router-dom';
 
 
 
@@ -10,13 +10,14 @@ const PasswordVerification = lazy(() => import('./../pages/PasswordVerification'
 const PasswordSuccess = lazy(() => import('./../pages/PasswordSuccess'));
 const Welcome = lazy(() => import('./../pages/Welcome'));
 
-// SIgnup pages
 const BusinessRegistration = lazy(() => import('./../pages/BusinessRegistration'));
 const BusinessType = lazy(() => import('./../pages/BusinessType'));
 const CompanyInformation=lazy(() => import('./../pages/CompanyInformation'));
 const SubscriptionPlan=lazy(() => import('./../pages/SubscriptionPlan'));
 const PaymentMethod=lazy(() => import('./../pages/PaymentMethod'));
 const PasswordCreation=lazy(() => import('./../pages/PasswordCreation'));
+const Dashboard=lazy(() => import('./../pages/Dashboard'));
+
 
 const router = createBrowserRouter([
     {
@@ -124,7 +125,15 @@ const router = createBrowserRouter([
       </Suspense>
     )
     }
- 
+     ,
+    {
+    path: '/Dashboard',
+    element: (
+      <Suspense fallback={''}>
+        <Dashboard/>
+      </Suspense>
+    )
+    }
 ]);
 
 

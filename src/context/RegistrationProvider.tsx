@@ -1,14 +1,16 @@
+// src/context/RegistrationProvider.tsx
 import React, { createContext, useEffect, useState } from "react";
 import type { ReactNode } from "react";
 
+/** Domain types */
 export type BizType = "sole" | "partnership" | "nonprofit" | "corporation" | "llc" | "other";
 export type ProfileType = "company" | "contractor" | "";
 export type Billing = "monthly" | "yearly";
-export type PlanId = 0 | 1 | null;       // 0: starter, 1: growth
+export type PlanId = 0 | 1 | null;
 export type PaymentType = "bank" | "stripe" | "";
 
+/** Persisted registration data (only during signup) */
 export interface RegistrationData {
-  // Welcome
   profileType: ProfileType;
 
   // Basic
@@ -32,11 +34,11 @@ export interface RegistrationData {
   phone: string;
   website: string;
 
-  // Payment (card)
+  // Payment (card) — we typically keep these local to the page, but keeping fields here
   cardName: string;
   cardNumber: string;
   expMonthValue: string;
-  exp: string;
+  exp: string; // MM/YY (derived)
   cvv: string;
   billingAddress1: string;
   billingAddress2: string;
@@ -44,23 +46,36 @@ export interface RegistrationData {
   // Step 4: Password
   password: string;
 
-  // Subscription selections
-  subscriptionBilling: Billing | "";  // "monthly" | "yearly" | ""
-  subscriptionPlanId: PlanId;         // 0 | 1 | null
-  subscriptionSeats: number;          // base seats for selected plan
+  // Subscription
+  subscriptionBilling: Billing | "";
+  subscriptionPlanId: PlanId;
+  subscriptionSeats: number;
 
-  // NEW: pricing in USD for payload and UI summary
-  subscriptionCurrency: "USD" | "";   // keep simple — your prices are in USD
-  subscriptionTotal: number;          // numeric amount (monthly or yearly)
-  subscriptionTotalDisplay: string;   // pretty string e.g. "$99/mon"
+  // Pricing in USD for payload/UI
+  subscriptionCurrency: "USD" | "";
+  subscriptionTotal: number;
+  subscriptionTotalDisplay: string;
 
-  // payment method
-  paymentType: PaymentType;           // "bank" | "stripe" | ""
+  // Payment method
+  paymentType: PaymentType;
 }
 
+/** Context value */
 export interface RegistrationContextValue {
   registrationData: RegistrationData;
   setRegistrationData: React.Dispatch<React.SetStateAction<RegistrationData>>;
+
+  /** Ephemeral token (OTP step). Not persisted. */
+  tempToken: string;
+  setTempToken: React.Dispatch<React.SetStateAction<string>>;
+
+  /** Signup scope controls */
+  startSignup: () => void;
+  finishSignup: (opts?: { clear?: boolean }) => void;
+  clearRegistrationData: () => void;
+
+  /** Is signup persistence active right now? */
+  signupActive: boolean;
 }
 
 const DEFAULT_DATA: RegistrationData = {
@@ -97,7 +112,6 @@ const DEFAULT_DATA: RegistrationData = {
   subscriptionPlanId: null,
   subscriptionSeats: 0,
 
-  // NEW defaults for price
   subscriptionCurrency: "",
   subscriptionTotal: 0,
   subscriptionTotalDisplay: "",
@@ -105,26 +119,85 @@ const DEFAULT_DATA: RegistrationData = {
   paymentType: "",
 };
 
-export const RegistrationContext =
-  createContext<RegistrationContextValue | undefined>(undefined);
+const STORAGE_KEY = "registrationData";
+const SCOPE_KEY = "signup:active";
+
+export const RegistrationContext = createContext<RegistrationContextValue | undefined>(undefined);
 
 export function RegistrationProvider({ children }: { children: ReactNode }) {
-  const [registrationData, setRegistrationData] = useState<RegistrationData>(() => {
+  // Scope flag — only when true do we read/write localStorage
+  const [signupActive, setSignupActive] = useState<boolean>(() => {
     try {
-      const raw = localStorage.getItem("registrationData");
-      const parsed = raw ? (JSON.parse(raw) as Partial<RegistrationData>) : {};
-      return { ...DEFAULT_DATA, ...parsed };
+      return sessionStorage.getItem(SCOPE_KEY) === "1";
     } catch {
-      return DEFAULT_DATA;
+      return false;
     }
   });
 
+  // Rehydrate from LS only if signup is active
+  const [registrationData, setRegistrationData] = useState<RegistrationData>(() => {
+    if (!signupActive) return { ...DEFAULT_DATA };
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      const parsed = raw ? (JSON.parse(raw) as Partial<RegistrationData>) : {};
+      return { ...DEFAULT_DATA, ...parsed };
+    } catch {
+      return { ...DEFAULT_DATA };
+    }
+  });
+
+  // Only persist when signup is active
   useEffect(() => {
-    localStorage.setItem("registrationData", JSON.stringify(registrationData));
-  }, [registrationData]);
+    if (!signupActive) return;
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(registrationData));
+    } catch {
+      // ignore
+    }
+  }, [registrationData, signupActive]);
+
+  // Ephemeral OTP token (never persisted)
+  const [tempToken, setTempToken] = useState<string>("");
+
+  const startSignup = () => {
+    try {
+      sessionStorage.setItem(SCOPE_KEY, "1");
+    } catch {}
+    setSignupActive(true);
+  };
+
+  const clearRegistrationData = () => {
+    try {
+      localStorage.removeItem(STORAGE_KEY);
+    } catch {}
+    setRegistrationData({ ...DEFAULT_DATA });
+  };
+
+  const finishSignup = (opts?: { clear?: boolean }) => {
+    try {
+      sessionStorage.removeItem(SCOPE_KEY);
+    } catch {}
+    setSignupActive(false);
+
+    if (opts?.clear) {
+      clearRegistrationData();
+      setTempToken("");
+    }
+  };
 
   return (
-    <RegistrationContext.Provider value={{ registrationData, setRegistrationData }}>
+    <RegistrationContext.Provider
+      value={{
+        registrationData,
+        setRegistrationData,
+        tempToken,
+        setTempToken,
+        startSignup,
+        finishSignup,
+        clearRegistrationData,
+        signupActive,
+      }}
+    >
       {children}
     </RegistrationContext.Provider>
   );

@@ -1,4 +1,4 @@
-import React, { useContext, useState } from "react";
+import React, { useContext, useState, useEffect } from "react";
 import SideDesign from "../components/SideDesign";
 import Button from "../components/Button";
 import companyLogo from "./../assets/figmaIcons/company.png";
@@ -22,6 +22,11 @@ const Welcome: React.FC = () => {
   };
 
 
+  useEffect(() => {
+  ctx?.startSignup();
+}, []);
+
+
 
   const CardRow: React.FC<{
     id: Card;
@@ -33,7 +38,7 @@ const Welcome: React.FC = () => {
       <button
         type="button"
         onClick={() => setSelected(id)}
-        className="w-full flex items-center gap-4 rounded-3xl px-5 py-5 border bg-white
+        className="w-full flex items-center gap-4 rounded-3xl md:p-5 p-3 border bg-white
                    shadow-[0_6px_24px_rgba(0,0,0,0.06)] text-left transition
                    hover:shadow-[0_8px_28px_rgba(0,0,0,0.10)] hover:border-primary-purple/50"
         aria-pressed={active}
@@ -43,10 +48,10 @@ const Welcome: React.FC = () => {
         </div>
 
         <div className="flex-1">
-          <div className="font-semibold text-primary-blue leading-tight text-2xl">
+          <div className="font-semibold text-primary-blue leading-tight sm:text-2xl text-lg">
             {title}
           </div>
-          <div className="text-xs text-primary-blue font-medium pt-2">{subtitle}</div>
+          <div className="sm:text-xs text-[10px] text-primary-blue font-medium pt-2">{subtitle}</div>
         </div>
 
         <span
@@ -71,7 +76,7 @@ const Welcome: React.FC = () => {
       <div className="md:col-span-3 flex items-center justify-center px-4">
         <div className="w-full max-w-lg">
           <div className="flex flex-col items-center gap-3 mb-8">
-            <h1 className="text-primary-blue font-semibold text-4xl text-center">
+            <h1 className="text-primary-blue font-semibold sm:text-4xt text-3xl text-center">
               Welcome and Choose <br className="hidden md:block" /> Your Profile Type
             </h1>
             <p className="text-xs text-gray-700 text-center">

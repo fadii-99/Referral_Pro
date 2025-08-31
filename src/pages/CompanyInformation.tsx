@@ -64,7 +64,7 @@ const CompanyInformation: React.FC = () => {
             <MultiStepHeader
               title="Company Information"
               current={3}
-              total={7}
+              total={6}
               onBack={() => navigate(-1)}
             />
           </div>

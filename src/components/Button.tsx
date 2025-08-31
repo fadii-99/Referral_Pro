@@ -12,7 +12,7 @@ const Button: React.FC<ButtonProps> = ({ text, onClick, disabled = false }) => {
       type="button"
       onClick={onClick}
       disabled={disabled}
-      className="mt-6 w-full rounded-full py-5 text-primary-blue text-sm font-semibold
+      className="mt-6 w-full rounded-full sm:py-5 py-4 text-primary-blue text-sm font-semibold
                  shadow-[0_10px_30px_rgba(0,0,0,0.12)] bg-secondary-blue transition
                  hover:shadow-[0_12px_36px_rgba(0,0,0,0.15)] hover:scale-[102%] duration-300
                  disabled:opacity-60 disabled:cursor-not-allowed"
