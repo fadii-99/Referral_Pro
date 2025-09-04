@@ -16,7 +16,7 @@ from django.contrib.auth import authenticate
 from django.conf import settings
 import jwt
 from .models import User
-from utils.email_service import send_otp, send_password_reset
+from utils.email_service import send_otp
 from utils.otp_utils import generate_otp, verify_otp
 from utils.twilio_service import TwilioService
 
@@ -284,8 +284,6 @@ class SendOTPView(APIView):
         email = request.data.get('email')
         phone = request.data.get('phone')
 
-        print(email)
-
         if not email and not phone:
             return Response({"error": "Either email or phone is required"}, status=400)
 
@@ -293,7 +291,6 @@ class SendOTPView(APIView):
         try:
             if email:
                 user = User.objects.get(email=email)
-                print(user.email)
             else:
                 user = User.objects.get(phone=phone)
         except User.DoesNotExist:
@@ -306,11 +303,11 @@ class SendOTPView(APIView):
         # Send OTP via email or SMS
         try:
             if email:
-                send_otp(email, otp.code)
+                send_otp(email, otp.code, "password reset", 10)
             else:
                 # print(phone)
                 twilio = TwilioService()
-                twilio.send_sms(phone, otp.code)
+                twilio.send_sms(phone, otp.code, "reset password", 10)
             
             return Response({"message": f"OTP sent successfully to your {'email' if email else 'phone'}", "otp": otp.code}, status=200)
         except Exception as e:
@@ -408,6 +405,7 @@ class UserInfoSerializer(serializers.ModelSerializer):
     def get_isVerified(self, obj):
         return getattr(obj, 'verified', False)
 
+
 class UserInfoView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -419,6 +417,7 @@ class UserInfoView(APIView):
             "isLogged": True,
             "isVerified": serializer.data.get("isVerified", False),
         })
+
 
 # -------------------------
 # Delete User by Email

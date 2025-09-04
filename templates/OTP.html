@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Your OTP Code</title>
+</head>
+<body style="margin:0;padding:0;background:#0b0b4a;font-family:'Segoe UI',Arial,sans-serif;">
+  <div style="max-width:600px;margin:40px auto;padding:20px;">
+    <!-- Card Container -->
+    <div style="background:#ffffff;padding:40px;border-radius:20px;box-shadow:0 8px 28px rgba(0,0,0,0.12);">
+      
+      <!-- Brand Logo / Title -->
+      <div style="text-align:center;margin-bottom:28px;">
+        <div style="display:inline-block;padding:10px 20px;background:#0b0b4a;border-radius:50px;">
+          <span style="font-size:1.4em;font-weight:700;color:#00d4ff;letter-spacing:1px;">Referral<span style="color:#fff;">Pro</span></span>
+        </div>
+      </div>
+
+      <!-- Intro Text -->
+      <div style="text-align:center;color:#333;font-size:1.05em;line-height:1.6;margin-bottom:28px;">
+        <p style="margin:0 0 10px;">Hello,</p>
+        <p style="margin:0;">You requested a one-time password (OTP) for 
+          <span style="color:#0b0b4a;font-weight:600;">{{ purpose }}</span>.  
+          Use the code below to continue:
+        </p>
+      </div>
+
+      <!-- OTP Code -->
+      <div style="background:linear-gradient(90deg,#0b0b4a 0%,#00d4ff 100%);padding:20px;border-radius:12px;text-align:center;color:#fff;font-size:2.4em;font-weight:700;letter-spacing:10px;margin:30px 0;">
+        {{ otp }}
+      </div>
+
+      <!-- Expiry Info -->
+      <div style="text-align:center;font-size:15px;color:#444;margin-top:12px;">
+        This code expires in 
+        <span style="color:#e74c3c;font-weight:600;">{{ expires_in }} minutes</span>.
+      </div>
+
+      <!-- Security Notice -->
+      <div style="text-align:center;font-size:14px;color:#e74c3c;margin-top:22px;font-weight:500;">
+        Do not share this code with anyone for security reasons.
+      </div>
+
+      <!-- Footer -->
+      <div style="text-align:center;color:#777;font-size:13px;line-height:1.6;margin-top:32px;">
+        <p style="margin:0;">If you didn’t request this code, just ignore this email.</p>
+        <p style="margin:6px 0 0;">&copy; 2025 <span style="color:#0b0b4a;font-weight:600;">ReferralPro</span>. All rights reserved.</p>
+      </div>
+    </div>
+  </div>
+</body>
+</html>
