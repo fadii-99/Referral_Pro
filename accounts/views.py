@@ -16,10 +16,16 @@ from django.contrib.auth import authenticate
 from django.conf import settings
 import jwt
 from .models import User
-from utils.email_service import send_otp
+from utils.email_service import send_otp, send_invitation_email
 from utils.otp_utils import generate_otp, verify_otp
 from utils.twilio_service import TwilioService
+import secrets
+import string
+from django.utils.timezone import localtime
 
+def generate_random_password(length=10):
+    chars = string.digits + string.ascii_uppercase + string.ascii_lowercase
+    return ''.join(secrets.choice(chars) for _ in range(length))
 
 # Utility: JWT tokens
 def get_tokens_for_user(user):
@@ -49,11 +55,6 @@ class SignupView(APIView):
                 return Response({"error": "Invalid payload format"}, status=400)
         else:
             data = request.data
-
-
-        
-
-        
 
         # -------------------
         # BUSINESS SIGNUP
@@ -148,6 +149,7 @@ class SignupView(APIView):
                 email=request.data.get("email"), password=request.data.get("password"), full_name=request.data.get("name"), role="solo"
             )
             tokens = get_tokens_for_user(user)
+
             return Response({
                 "message": "Solo user registered successfully",
                 "user": {"email": user.email, "name": user.full_name, "role": user.role},
@@ -157,12 +159,10 @@ class SignupView(APIView):
 
 
 
-
 class EmailPasswordLoginView(APIView):
     permission_classes = [AllowAny]
     authentication_classes = []
 
-    """Email/Password login (Solo users only for now)"""
     def post(self, request):
         print(request.data)
         email = request.data.get("email")
@@ -174,16 +174,31 @@ class EmailPasswordLoginView(APIView):
         user = authenticate(request, email=email, password=password)
         if not user:
             return Response({"error": "Invalid credentials"}, status=401)
-        # if not user or user.role != "solo":
-        #     return Response({"error": "Invalid credentials or not a solo user"}, status=401)
+        
+        # if request.data.get('role') == user.role != "solo":
+        #     return Response({"error": "You are not a solo user"}, status=401)
 
         tokens = get_tokens_for_user(user)
         user.is_active = True
         user.save()
-        return Response({
+
+        print("tokens", tokens)
+
+        response = Response({
             "user": {"email": user.email, "name": user.full_name, "role": user.role},
-            "tokens": tokens
+             "tokens": tokens
         }, status=200)
+
+        
+        # response.set_cookie(
+        #     key="access_token",
+        #     value=tokens["access"],
+        #     httponly=True,
+        #     secure=False,
+        #     samesite="None"
+        # )
+
+        return response
 
 
 # -------------------------
@@ -385,38 +400,171 @@ class CreateNewPasswordView(APIView):
             return Response({"error": "Invalid or expired token"}, status=400)
 
 
+# =========================================
+# Employee Invitation & Password Setup
+# =========================================
+class EmployeeManagementView(APIView):
+    permission_classes = [IsAuthenticated]
 
-class UserInfoSerializer(serializers.ModelSerializer):
-    profile_image = serializers.SerializerMethodField()
-    isVerified = serializers.SerializerMethodField()
+    def get(self, request):
+        """List employees under current company"""
+        employees = User.objects.filter(parent_company=request.user, role="employee")
 
-    class Meta:
-        model = User
-        fields = ["id", "email", "full_name", "phone", "role", "profile_image", "isVerified"]
+        employee_list = []
+        for emp in employees:
+            employee_list.append({
+                "id": emp.id,
+                "email": emp.email,
+                "full_name": emp.full_name,
+                "phone": emp.phone,
+                "role": emp.role,
+                "is_active": emp.is_active,
+                "last_login": localtime(emp.last_login).strftime("%Y-%m-%d %H:%M:%S") if emp.last_login else None
+            })
 
-    def get_profile_image(self, obj):
-        if obj.image:
-            request = self.context.get('request')
-            if request is not None:
-                return request.build_absolute_uri(obj.image.url)
-            return obj.image.url
-        return None
+        return Response({"employees": employee_list}, status=status.HTTP_200_OK)
 
-    def get_isVerified(self, obj):
-        return getattr(obj, 'verified', False)
+    def post(self, request):
+        """Invite employee (send email + generate password)"""
+        email = request.data.get("email")
+        name = request.data.get("name")
+
+        if not email or not name:
+            return Response({"error": "Email and name are required"}, status=status.HTTP_400_BAD_REQUEST)
+
+        if User.objects.filter(email=email).exists():
+            return Response({"error": "User with this email already exists"}, status=status.HTTP_400_BAD_REQUEST)
+
+        password = generate_random_password()
+
+        user = User.objects.create_user(
+            email=email,
+            password=password,
+            full_name=name,
+            role="employee",
+            is_passwordSet=False,
+            parent_company=request.user if request.user.role == "company" else None
+        )
+
+        try:
+            send_invitation_email(email, name, password)
+        except Exception as e:
+            user.delete()
+            return Response({"error": f"Failed to send invitation: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        return Response({
+            "message": "Invitation sent successfully",
+            "user": {
+                "id": user.id,
+                "email": user.email,
+                "name": user.full_name,
+                "role": user.role
+            }
+        }, status=status.HTTP_200_OK)
+
+    def put(self, request):
+        """Edit employee details"""
+        user_id = request.data.get("id")
+        if not user_id:
+            return Response({"error": "Employee ID required"}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            user = User.objects.get(id=user_id, role="employee", parent_company=request.user)
+        except User.DoesNotExist:
+            return Response({"error": "Employee not found"}, status=status.HTTP_404_NOT_FOUND)
+
+        name = request.data.get("name")
+        email = request.data.get("email")
+        phone = request.data.get("phone")
+
+        if email and User.objects.exclude(id=user_id).filter(email=email).exists():
+            return Response({"error": "Email already in use"}, status=status.HTTP_400_BAD_REQUEST)
+
+        if name:
+            user.full_name = name
+        if email:
+            user.email = email
+        if phone:
+            user.phone = phone
+
+        user.save()
+
+        return Response({
+            "message": "Employee updated successfully",
+            "user": {
+                "id": user.id,
+                "email": user.email,
+                "name": user.full_name,
+                "phone": user.phone,
+                "role": user.role
+            }
+        }, status=status.HTTP_200_OK)
+
+    def delete(self, request):
+        """Delete employee"""
+        user_id = request.GET.get("id")
+        print("user_id", user_id)
+        if not user_id:
+            return Response({"error": "Employee ID required"}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            user = User.objects.get(id=user_id, role="employee", parent_company=request.user)
+        except User.DoesNotExist:
+            return Response({"error": "Employee not found"}, status=status.HTTP_404_NOT_FOUND)
+
+        user.delete()
+        return Response({"message": "Employee deleted successfully"}, status=status.HTTP_200_OK)
+
+
+
+
+class SendResetPasswordView(APIView):
+    permission_classes = [IsAuthenticated]
+    def get(self, request):
+        email = request.GET.get("id")
+        if not email:
+            return Response({"error": "Email is required"}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            user = User.objects.get(email=email, role="employee", parent_company=request.user)
+        except User.DoesNotExist:
+            return Response({"error": "Employee not found"}, status=status.HTTP_404_NOT_FOUND)
+
+        new_password = generate_random_password()
+        user.set_password(new_password)
+        user.is_passwordSet = False
+        user.save()
+
+        try:
+            send_invitation_email(email, user.full_name, new_password)
+        except Exception as e:
+            return Response({"error": f"Failed to send email: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        return Response({"message": "Password reset and emailed successfully"}, status=status.HTTP_200_OK)
+# ==========================================
+# ==========================================
+
 
 
 class UserInfoView(APIView):
     permission_classes = [IsAuthenticated]
 
-    def get(self, request):
-        serializer = UserInfoSerializer(request.user, context={"request": request})
+    def post(self, request):
+        print("\n\n\nheader", request.headers,"\n\n\n")
+        user = User.objects.get(id=request.user.id)
+
+
         return Response({
-            "user": serializer.data,
-            "profile_image": serializer.data.get("profile_image"),
-            "isLogged": True,
-            "isVerified": serializer.data.get("isVerified", False),
-        })
+            "user": {
+                "id": user.id,
+                "email": user.email,
+                "full_name": user.full_name,
+                "phone": user.phone,
+                "role": user.role,
+            },
+        }, status=200)
+
+            
 
 
 # -------------------------

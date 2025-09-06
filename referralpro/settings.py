@@ -38,6 +38,7 @@ INSTALLED_APPS = [
 
     # Local apps
     'accounts',
+    'referr',
 ]
 
 # -------------------------
@@ -97,15 +98,24 @@ AUTH_USER_MODEL = "accounts.User"
 # -------------------------
 # REST Framework & JWT
 # -------------------------
+
 REST_FRAMEWORK = {
-    "DEFAULT_AUTHENTICATION_CLASSES": (
-        "rest_framework_simplejwt.authentication.JWTAuthentication",
-    ),
-    "DEFAULT_PERMISSION_CLASSES": (
-        "rest_framework.permissions.IsAuthenticated",
+    'DEFAULT_AUTHENTICATION_CLASSES': (
+        'rest_framework_simplejwt.authentication.JWTAuthentication',
     ),
 }
-
+from datetime import timedelta
+SIMPLE_JWT = {
+    "ACCESS_TOKEN_LIFETIME": timedelta(minutes=600),   # 🔹 1 hour
+    "REFRESH_TOKEN_LIFETIME": timedelta(days=7),      # 🔹 7 days
+    "ROTATE_REFRESH_TOKENS": True,                    # issue new refresh token on each use
+    "BLACKLIST_AFTER_ROTATION": True,                 # old refresh tokens become invalid
+    "AUTH_HEADER_TYPES": ("Bearer",),                 # for Authorization: Bearer <token>
+    "AUTH_COOKIE": "access_token",                    # optional, if you want DRF cookies
+    "AUTH_COOKIE_SECURE": True,                       # secure cookies for HTTPS
+    "AUTH_COOKIE_HTTP_ONLY": True,
+    "AUTH_COOKIE_SAMESITE": "Lax",
+}
 # -------------------------
 # Redis & Celery
 # -------------------------

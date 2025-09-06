@@ -49,10 +49,19 @@ class User(AbstractBaseUser, PermissionsMixin):
     image = models.ImageField(upload_to="profiles/", null=True, blank=True)
     role = models.CharField(max_length=20, choices=ROLE_CHOICES, default="solo")
 
+    parent_company = models.ForeignKey(
+        "self",
+        on_delete=models.SET_NULL,
+        related_name="employees",
+        null=True,
+        blank=True,
+        limit_choices_to={"role": "company"},
+    )
     is_active = models.BooleanField(default=True)
     is_staff = models.BooleanField(default=False)
     is_paid = models.BooleanField(default=False)
-    # is_ = models.BooleanField(default=False)
+    is_verified = models.BooleanField(default=False)
+    is_passwordSet = models.BooleanField(default=False)
 
     objects = UserManager()
 

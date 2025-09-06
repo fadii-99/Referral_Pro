@@ -4,49 +4,43 @@
   <meta charset="UTF-8">
   <title>Your OTP Code</title>
 </head>
-<body style="margin:0;padding:0;background:#0b0b4a;font-family:'Segoe UI',Arial,sans-serif;">
-  <div style="max-width:600px;margin:40px auto;padding:20px;">
-    <!-- Card Container -->
-    <div style="background:#ffffff;padding:40px;border-radius:20px;box-shadow:0 8px 28px rgba(0,0,0,0.12);">
-      
-      <!-- Brand Logo / Title -->
-      <div style="text-align:center;margin-bottom:28px;">
-        <div style="display:inline-block;padding:10px 20px;background:#0b0b4a;border-radius:50px;">
-          <span style="font-size:1.4em;font-weight:700;color:#00d4ff;letter-spacing:1px;">Referral<span style="color:#fff;">Pro</span></span>
-        </div>
-      </div>
+<body style="margin:0; padding:0; background-color:#f7f8fa; font-family:Arial, sans-serif;">
+  <div style="max-width:600px; margin:30px auto; background:#ffffff; border-radius:8px; padding:30px; border:1px solid #e5e7eb;">
+    
+    <!-- Header -->
+    <h2 style="color:#02025c; margin-bottom:15px; font-size:22px; font-weight:bold; text-align:center;">
+      Your OTP Code
+    </h2>
 
-      <!-- Intro Text -->
-      <div style="text-align:center;color:#333;font-size:1.05em;line-height:1.6;margin-bottom:28px;">
-        <p style="margin:0 0 10px;">Hello,</p>
-        <p style="margin:0;">You requested a one-time password (OTP) for 
-          <span style="color:#0b0b4a;font-weight:600;">{{ purpose }}</span>.  
-          Use the code below to continue:
-        </p>
-      </div>
+    <!-- Intro -->
+    <p style="color:#333333; line-height:1.6; margin:0 0 15px 0; text-align:center;">
+      Hello,<br>
+      You requested a one-time password (OTP) for 
+      <strong style="color:#02025c;">{{ purpose }}</strong>.
+    </p>
 
-      <!-- OTP Code -->
-      <div style="background:linear-gradient(90deg,#0b0b4a 0%,#00d4ff 100%);padding:20px;border-radius:12px;text-align:center;color:#fff;font-size:2.4em;font-weight:700;letter-spacing:10px;margin:30px 0;">
-        {{ otp }}
-      </div>
-
-      <!-- Expiry Info -->
-      <div style="text-align:center;font-size:15px;color:#444;margin-top:12px;">
-        This code expires in 
-        <span style="color:#e74c3c;font-weight:600;">{{ expires_in }} minutes</span>.
-      </div>
-
-      <!-- Security Notice -->
-      <div style="text-align:center;font-size:14px;color:#e74c3c;margin-top:22px;font-weight:500;">
-        Do not share this code with anyone for security reasons.
-      </div>
-
-      <!-- Footer -->
-      <div style="text-align:center;color:#777;font-size:13px;line-height:1.6;margin-top:32px;">
-        <p style="margin:0;">If you didn’t request this code, just ignore this email.</p>
-        <p style="margin:6px 0 0;">&copy; 2025 <span style="color:#0b0b4a;font-weight:600;">ReferralPro</span>. All rights reserved.</p>
-      </div>
+    <!-- OTP Code -->
+    <div style="background:#02025c; color:#ffffff; font-size:28px; font-weight:bold; letter-spacing:8px; text-align:center; padding:20px; border-radius:6px; margin:25px 0;">
+      {{ otp }}
     </div>
+
+    <!-- Expiry -->
+    <p style="color:#333333; font-size:15px; line-height:1.5; margin:0 0 15px 0; text-align:center;">
+      This code expires in 
+      <span style="color:#e74c3c; font-weight:bold;">{{ expires_in }} minutes</span>.
+    </p>
+
+    <!-- Security Warning -->
+    <p style="color:#e74c3c; font-size:14px; line-height:1.5; font-weight:600; margin:20px 0; text-align:center;">
+      Do not share this code with anyone for security reasons.
+    </p>
+
+    <!-- Footer -->
+    <div style="margin-top:30px; font-size:12px; color:#6b7280; text-align:center; line-height:1.6;">
+      <p style="margin:0;">If you didn’t request this code, you can safely ignore this email.</p>
+      <p style="margin:6px 0 0;">&copy; 2025 <strong style="color:#02025c;">ReferralPro</strong>. All rights reserved.</p>
+    </div>
+
   </div>
 </body>
 </html>
