@@ -43,6 +43,7 @@ const InviteMember: React.FC = () => {
     navigate("/finish"); 
   };
 
+  
   return (
     <div className="grid md:grid-cols-5 w-full min-h-screen">
       <SideDesign />

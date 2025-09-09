@@ -50,20 +50,40 @@ const Login: React.FC = () => {
       const res = await fetch(`${serverUrl}/auth/login/`, {
         method: "POST",
         body: fd,
+        // credentials: "include", 
       });
 
-      const ct = res.headers.get("content-type") || "";
-      const data = ct.includes("application/json") ? await res.json() : await res.text();
+      // --- Just log the response so you can find the token yourself ---
+      console.log("[login] status:", res.status, res.statusText);
+      const headersDump: Record<string, string> = {};
+      res.headers.forEach((v, k) => (headersDump[k] = v));
+      // console.log("[login] headers:", headersDump);
+
+      const raw = await res.text();
+      
+      let json: any = null;
+      try {
+        json = raw ? JSON.parse(raw) : null;
+      } catch {}
+      // console.log("[login] json (if parsable):", json);
+      // --- end logging ---
 
       if (!res.ok) {
         const msg =
-          (data && typeof data !== "string" && (data.error || data.detail || data.message)) ||
-          (typeof data === "string" ? data : "Invalid credentials");
+          (json && typeof json !== "string" && (json.error || json.detail || json.message)) ||
+          (typeof json === "string" ? json : raw || "Invalid credentials");
         toast.error(msg);
         return;
       }
 
-      // handle remember me
+
+       if (json?.tokens?.access) {
+  localStorage.setItem("accessToken", json.tokens.access);
+}
+
+
+
+      // remember me
       if (rememberMe && form.email.trim()) {
         localStorage.setItem("rememberEmail", form.email.trim());
       } else {
@@ -72,7 +92,7 @@ const Login: React.FC = () => {
 
       navigate("/Dashboard");
     } catch (err) {
-      console.error("Login error:", err);
+      console.error("[login] network error:", err);
       toast.error("Network error. Try again.");
     } finally {
       setLoading(false);

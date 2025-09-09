@@ -2,6 +2,8 @@ import './App.css';
 import { RouterProvider } from 'react-router-dom';
 import router from './routes/router';
 import { RegistrationProvider } from './context/RegistrationProvider';
+import { TeamMembersProvider } from './context/TeamMembersProvider';
+import { ReferralProvider } from './context/ReferralProvider';
 
 
 function App() {
@@ -9,9 +11,13 @@ function App() {
 
   return (
   <>
-  <RegistrationProvider>
-          <RouterProvider router={router} /> 
-  </RegistrationProvider>
+   <ReferralProvider>
+      <TeamMembersProvider>
+        <RegistrationProvider>
+                <RouterProvider router={router} /> 
+        </RegistrationProvider>
+      </TeamMembersProvider>
+    </ReferralProvider>
   </>
   )
 }

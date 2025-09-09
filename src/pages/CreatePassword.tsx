@@ -106,10 +106,10 @@ const CreatePassword: React.FC = () => {
         <div className="w-full max-w-lg">
           {/* Heading */}
           <div className="flex flex-col items-center gap-3 mb-8">
-            <h1 className="text-primary-blue font-semibold text-4xl">
+            <h1 className="text-primary-blue font-semibold sm:text-4xl text-3xl">
               Create new password
             </h1>
-            <p className="text-xs text-gray-700 text-center">
+            <p className="text-[11px] sm:text-xs md:text-sm text-center">
               Use a new password you haven&apos;t used before.
             </p>
           </div>

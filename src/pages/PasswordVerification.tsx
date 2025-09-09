@@ -148,7 +148,6 @@ const PasswordVerification: React.FC = () => {
 
       localStorage.removeItem("Email");
 
-      toast.success(typeof data === "string" ? "Code verified" : data?.message || "Code verified");
       navigate("/CreatePassword");
     } catch (err) {
       console.error("Verify error:", err);
@@ -186,9 +185,6 @@ const PasswordVerification: React.FC = () => {
         } catch {}
       }
 
-      if (typeof data === "string" && /<html/i.test(data)) {
-        throw new Error("Ngrok warning page returned. Add skip flag or fix CORS.");
-      }
 
       if (!res.ok) {
         console.groupCollapsed(`❌ resend_otp failed ${res.status} ${res.statusText}`);
@@ -211,6 +207,7 @@ const PasswordVerification: React.FC = () => {
     }
   };
 
+  
   return (
     <div className="grid md:grid-cols-5 w-full min-h-screen">
       <SideDesign />

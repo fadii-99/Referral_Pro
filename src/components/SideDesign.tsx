@@ -8,8 +8,8 @@ function SideDesign() {
     return (
           <div className="w-full h-screen bg-primary-blue md:col-span-2 p-8 relative hidden md:block">
             <div className='flex flex-col items-start gap-10'>
-                <div>
-                    <img src={referralProLogo} alt="referral-pro-logo" className='h-14 w-auto' />
+                <div className='bg-white rounded-full p-3'>
+                    <img src={referralProLogo} alt="referral-pro-logo" className='h-6 w-auto' />
                 </div>
                 <h1 className='text-4xl text-white font-bold mt-10'>Referring made simple track rewards on the go.</h1>
                 <p className='text-lg text-gray-100 font-light'>Turn connections into rewards—hassle free</p>

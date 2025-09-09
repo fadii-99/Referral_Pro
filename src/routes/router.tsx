@@ -16,7 +16,17 @@ const CompanyInformation=lazy(() => import('./../pages/CompanyInformation'));
 const SubscriptionPlan=lazy(() => import('./../pages/SubscriptionPlan'));
 const PaymentMethod=lazy(() => import('./../pages/PaymentMethod'));
 const PasswordCreation=lazy(() => import('./../pages/PasswordCreation'));
+
+// Dashboard
+import DashboardParent from './DashboardParent';
 const Dashboard=lazy(() => import('./../pages/Dashboard'));
+const Analytics=lazy(() => import('./../pages/Analytics'));
+const Team=lazy(() => import('./../pages/Team'));
+const Referral=lazy(() => import('./../pages/Referral'));
+const Notifications=lazy(() => import('./../pages/Notifications.tsx'));
+const Profile=lazy(() => import('./../pages/Profile.tsx'));
+
+
 
 
 const router = createBrowserRouter([
@@ -126,13 +136,65 @@ const router = createBrowserRouter([
     )
     }
      ,
+    //  Dashboard
     {
     path: '/Dashboard',
     element: (
       <Suspense fallback={''}>
-        <Dashboard/>
+        <DashboardParent/>
       </Suspense>
-    )
+    ),
+    children: [
+      {
+        index: true ,
+          element: (
+          <Suspense fallback={''}>
+            <Dashboard/>
+          </Suspense>
+        )
+      }
+      ,
+       {
+         path: 'Analytics',
+          element: (
+          <Suspense fallback={''}>
+            <Analytics/>
+          </Suspense>
+        )
+      }
+        ,
+       {
+         path: 'Team',
+          element: (
+          <Suspense fallback={''}>
+            <Team/>
+          </Suspense>
+        )
+      }
+       ,
+       {
+         path: 'Referral',
+          element: (
+          <Suspense fallback={''}>
+            <Referral/>
+          </Suspense>
+        )
+      }
+       ,
+       {
+         path: 'Notifications',
+          element: (
+          <Suspense fallback={''}>
+            <Notifications/>
+          </Suspense>
+        )
+      }
+      ,
+      {
+        path: "/Dashboard/Profile",
+        element: <Profile />,
+      }
+    ]
     }
 ]);
 
