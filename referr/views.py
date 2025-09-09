@@ -174,7 +174,7 @@ class ListCompanyReferralView(APIView):
     permission_classes = [IsAuthenticated]
 
 
-    def post(self, request):
+    def get(self, request):
         referrals = Referral.objects.filter(company=request.user)
         referral_list = []
         for referral in referrals:  

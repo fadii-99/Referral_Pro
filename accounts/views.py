@@ -27,6 +27,8 @@ def generate_random_password(length=10):
     chars = string.digits + string.ascii_uppercase + string.ascii_lowercase
     return ''.join(secrets.choice(chars) for _ in range(length))
 
+
+
 # Utility: JWT tokens
 def get_tokens_for_user(user):
     refresh = RefreshToken.for_user(user)
@@ -85,6 +87,7 @@ class SignupView(APIView):
 
             # Create BusinessInfo linked to user
             business = BusinessInfo.objects.create(
+                user=user,  # ✅ Add this line to link BusinessInfo to the user
                 company_name=data.get("companyInfo", {}).get("companyName", ""),
                 industry=data.get("basic", {}).get("industry", ""),
                 employees=data.get("businessType", {}).get("employees", ""),
@@ -98,6 +101,7 @@ class SignupView(APIView):
             )
 
             user.parent_company = user  # Self-reference for parent_company
+            user.save()
 
             # Now start Stripe payment (after DB records are stored)
             try:
