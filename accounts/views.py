@@ -61,12 +61,8 @@ class SignupView(APIView):
         # -------------------
         if request.data.get('role') != 'solo':
 
-            print(data)
-            # Default role = solo
             role = data.get("welcome", {}).get("role")
-            print(role)
 
-            print(data)
 
             email = data.get("basic", {}).get("email") or data.get("email")
             password = data.get("password", {}).get("value")
@@ -88,8 +84,7 @@ class SignupView(APIView):
             )
 
             # Create BusinessInfo linked to user
-            BusinessInfo.objects.create(
-                user=user,
+            business = BusinessInfo.objects.create(
                 company_name=data.get("companyInfo", {}).get("companyName", ""),
                 industry=data.get("basic", {}).get("industry", ""),
                 employees=data.get("businessType", {}).get("employees", ""),
@@ -101,6 +96,8 @@ class SignupView(APIView):
                 website=data.get("companyInfo", {}).get("website", ""),
                 us_state=data.get("businessType", {}).get("usState", ""),
             )
+
+            user.parent_company = user  # Self-reference for parent_company
 
             # Now start Stripe payment (after DB records are stored)
             try:
@@ -287,7 +284,7 @@ class SocialLoginView(APIView):
             "picture": None
         }
 
-
+ 
 # -------------------------
 # Password Reset Flow
 # -------------------------
@@ -400,6 +397,7 @@ class CreateNewPasswordView(APIView):
             return Response({"error": "Invalid or expired token"}, status=400)
 
 
+
 # =========================================
 # Employee Invitation & Password Setup
 # =========================================
@@ -508,13 +506,36 @@ class EmployeeManagementView(APIView):
             return Response({"error": "Employee ID required"}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
-            user = User.objects.get(id=user_id, role="employee", parent_company=request.user)
+            user = User.objects.get(id=user_id, role="employee")
         except User.DoesNotExist:
             return Response({"error": "Employee not found"}, status=status.HTTP_404_NOT_FOUND)
 
         user.delete()
         return Response({"message": "Employee deleted successfully"}, status=status.HTTP_200_OK)
 
+
+
+
+class TestEmployeeManagementView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        """List employees under current company"""
+        employees = User.objects.filter(parent_company=request.user, role="employee")
+
+        employee_list = []
+        for emp in employees:
+            employee_list.append({
+                "id": emp.id,
+                "email": emp.email,
+                "full_name": emp.full_name,
+                "phone": emp.phone,
+                "role": emp.role,
+                "is_active": emp.is_active,
+                "last_login": localtime(emp.last_login).strftime("%Y-%m-%d %H:%M:%S") if emp.last_login else None
+            })
+
+        return Response({"employees": employee_list}, status=status.HTTP_200_OK)
 
 
 

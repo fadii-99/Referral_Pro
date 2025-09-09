@@ -11,6 +11,7 @@ from .views import (
     UserInfoView,
     EmployeeManagementView,
     SendResetPasswordView,
+    TestEmployeeManagementView
 )
 
 urlpatterns = [
@@ -28,6 +29,7 @@ urlpatterns = [
     path('get_user/', UserInfoView.as_view(), name='get_user'),
 
     path('employees/', EmployeeManagementView.as_view(), name='send_invite'),
+    path('employees_post/', TestEmployeeManagementView.as_view(), name='send_invite'),
     path('employee_reset_password/<int:id>/', SendResetPasswordView.as_view(), name='send_reset_password'),
     # path('set_password/', SetEmployeePasswordView.as_view(), name='set_password'),
     # path('employee_list/', ListEmployeesView.as_view(), name='employee_list'),
@@ -39,6 +41,6 @@ urlpatterns = [
 
     # Social auth endpoints
     # path('google/', GoogleLoginView.as_view(), name='google_login'),
-    # path('facebook/', FacebookLoginView.as_view(), name='facebook_login'),
+    path('facebook/callback/<str:code>/', SocialLoginView.as_view(), name='facebook_login'),
     # path('apple/', AppleLoginView.as_view(), name='apple_login'),
 ]

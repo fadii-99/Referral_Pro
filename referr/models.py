@@ -1,5 +1,6 @@
 from django.db import models
 from accounts.models import User
+import uuid
 
 
 
@@ -13,6 +14,9 @@ class Referral(models.Model):
         ("cancelled", "Cancelled"),
     ]
 
+    reference_id = models.CharField(
+        max_length=20, unique=True, editable=False, default=""
+    )
     referred_by = models.ForeignKey(
         User,
         on_delete=models.CASCADE,
@@ -33,7 +37,7 @@ class Referral(models.Model):
     urgency = models.CharField(max_length=50, blank=True, null=True)
     notes = models.TextField(blank=True, null=True)
     privacy_opted = models.BooleanField(default=False)
-    permission_concent = models.BooleanField(default=False)
+    permission_consent = models.BooleanField(default=False)
 
     status = models.CharField(
         max_length=20, choices=STATUS_CHOICES, default="pending"
@@ -44,4 +48,9 @@ class Referral(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):
-        return f"Referral {self.id} from {self.referred_by.email} to {self.referred_to.email} ({self.company.company_name})"
+        return f"Referral {self.reference_id} from {self.referred_by.email} to {self.referred_to.email} ({self.company.company_name})"
+
+    def save(self, *args, **kwargs):
+        if not self.reference_id:
+            self.reference_id = f"REF-{uuid.uuid4().hex[:8].upper()}"
+        super().save(*args, **kwargs)
