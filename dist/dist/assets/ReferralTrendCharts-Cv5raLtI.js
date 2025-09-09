@@ -1,4 +1,4 @@
-import{r as st,b as Hs,j as dt}from"./index-BNIc-81g.js";/*!
+import{r as st,b as Hs,j as dt}from"./index-BPYl9JkP.js";/*!
  * @kurkle/color v0.3.4
  * https://github.com/kurkle/color#readme
  * (c) 2024 Jukka Kurkela
