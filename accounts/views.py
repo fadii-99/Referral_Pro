@@ -182,7 +182,7 @@ class EmailPasswordLoginView(APIView):
         print("tokens", tokens)
 
         response = Response({
-            "user": {"email": user.email, "name": user.full_name, "role": user.role},
+            "user": {"email": user.email, "name": user.full_name, "role": user.role, "is_passwordSet": user.is_passwordSet, "is_staff":user.is_staff},
              "tokens": tokens
         }, status=200)
 

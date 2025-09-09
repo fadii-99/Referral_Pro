@@ -6,6 +6,8 @@ from accounts.models import BusinessInfo
 from rest_framework import status
 from .models import Referral
 from accounts.models import User, BusinessInfo
+from utils.email_service import send_app_download_email
+from utils.twilio_service import TwilioService
 
 
 
@@ -227,6 +229,79 @@ class ListCompanyReferralView(APIView):
             },
             status=status.HTTP_200_OK,
         )
+
+
+class SendAppInvitationView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        data = request.data
+
+        print(data)
+        
+        # Get data from request
+        email = data.get("email")
+        phone = data.get("phone")
+        name = data.get("name")
+        
+        # Validate required fields
+        if not email or not name:
+            return Response(
+                {"error": "Email and name are required"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        
+        # Validate email format
+        from django.core.validators import validate_email
+        from django.core.exceptions import ValidationError
+        
+        try:
+            validate_email(email)
+        except ValidationError:
+            return Response(
+                {"error": "Invalid email format"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        
+        try:
+            # Get sender's name from the authenticated user
+            sender_name = request.user.full_name or request.user.email
+            
+            # Send the app download invitation email
+            send_app_download_email(
+                email=email,
+                name=name,
+                sender_name=sender_name
+            )
+
+            if phone:
+                sms_result = TwilioService.send_app_download_sms(
+                    phone_number=phone,
+                    name=name,
+                    sender_name=sender_name
+                )
+            
+            return Response(
+                {
+                    "message": "Invitation sent successfully",
+                },
+                status=status.HTTP_200_OK,
+            )
+            
+
+            
+        except Exception as e:
+            return Response(
+                {"error": f"Failed to send invitation: {str(e)}"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+        
+
+
+
+
+
+
 
 
 

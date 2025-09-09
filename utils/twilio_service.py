@@ -14,7 +14,38 @@ class TwilioService:
 
         message = self.client.messages.create(
             body=message_body,
-            from_="ReferralPro",
+            from_=settings.TWILIO_PHONE_NUMBER,
             to=phone_number
         )
         return message.sid
+
+    @classmethod
+    def send_app_download_sms(cls, phone_number: str, name: str, sender_name: str = None):
+        """
+        Send SMS invitation to download the ReferralPro app
+        """
+        try:
+            # Create an instance to use the client
+            service = cls()
+            
+            message_body = (
+                f"Hi {name}!\n\n"
+                f"{sender_name + ' has' if sender_name else 'You have'} been invited to join ReferralPro "
+                "- the app that makes referrals easy and rewarding!\n\n"
+                "Create account and Register your company:\n"
+                "Start building your referral network today!\n\n"
+                "Best regards,\nReferralPro Team"
+            )
+
+            message = service.client.messages.create(
+                body=message_body,
+                from_=settings.TWILIO_PHONE_NUMBER,
+                to=phone_number
+            )
+            return {"success": True, "sid": message.sid}
+
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+
+
