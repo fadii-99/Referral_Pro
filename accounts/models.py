@@ -1,7 +1,12 @@
 # accounts/models.py
 from django.contrib.auth.models import AbstractBaseUser, PermissionsMixin, BaseUserManager
 from django.db import models
+from django.core.files.storage import FileSystemStorage
 
+# Import the custom storage
+from utils.storage_backends import MediaStorage
+
+media_storage = MediaStorage()
 
 # SubscriptionPlan model
 class SubscriptionPlan(models.Model):
@@ -11,8 +16,6 @@ class SubscriptionPlan(models.Model):
 
     def __str__(self):
         return f"{self.name} ({self.seats} seats, ${self.price})"
-
-
 
 
 class UserManager(BaseUserManager):
@@ -46,7 +49,9 @@ class User(AbstractBaseUser, PermissionsMixin):
     email = models.EmailField(unique=True)
     full_name = models.CharField(max_length=150, blank=True)
     phone = models.CharField(max_length=20, blank=True, null=True)
-    image = models.ImageField(upload_to="profiles/", null=True, blank=True)
+    
+    # CHANGED: Update image field with custom storage and change upload_to path temporarily
+    image = models.ImageField(upload_to="user_profiles/", storage=media_storage, null=True, blank=True)
     role = models.CharField(max_length=20, choices=ROLE_CHOICES, default="solo")
 
     parent_company = models.ForeignKey(
@@ -71,6 +76,11 @@ class User(AbstractBaseUser, PermissionsMixin):
     def __str__(self):
         return f"{self.email} ({self.role})"
 
+    def get_image_url(self):
+        """Get the full S3 URL for the image"""
+        if self.image:
+            return self.image.url
+        return None
 
 
 # BusinessInfo model
@@ -89,9 +99,6 @@ class BusinessInfo(models.Model):
 
     def __str__(self):
         return f"{self.company_name} ({self.user.email})"
-
-
-
 
 
 class OtpCode(models.Model):
@@ -117,37 +124,167 @@ class OtpCode(models.Model):
         return f"OTP for {self.user.email} ({self.code}) - {self.purpose}"
 
 
-
-# Subscriptions model
 class Subscription(models.Model):
-    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='subscriptions')
-    plan = models.ForeignKey(SubscriptionPlan, on_delete=models.CASCADE, related_name='subscriptions')
-    active_date = models.DateTimeField()
-    expiry_date = models.DateTimeField()
-    duration = models.PositiveIntegerField(help_text='Duration in days')
+    """
+    Stores user subscription details with full management capabilities.
+    """
+    PLAN_CHOICES = [
+        ('monthly', 'Monthly'),
+        ('yearly', 'Yearly'),
+    ]
+    STATUS_CHOICES = [
+        ('active', 'Active'),
+        ('cancelled', 'Cancelled'),
+        ('past_due', 'Past Due'),
+        ('unpaid', 'Unpaid'),
+        ('incomplete', 'Incomplete'),
+        ('incomplete_expired', 'Incomplete Expired'),
+        ('trialing', 'Trialing'),
+    ]
+
+    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='subscription')
+    plan_name = models.CharField(max_length=100, default='Basic Plan')
+    subscription_type = models.CharField(max_length=10, choices=PLAN_CHOICES, default='monthly')
+    price = models.DecimalField(max_digits=10, decimal_places=2, default=0.00)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='active')
+    
+    # Subscription limits and features
+    seats_limit = models.PositiveIntegerField(default=1, help_text="Number of employees allowed")
+    seats_used = models.PositiveIntegerField(default=0, help_text="Current number of employees")
+    
+    # Stripe subscription details
+    stripe_subscription_id = models.CharField(max_length=255, blank=True, null=True)
+    stripe_customer_id = models.CharField(max_length=255, blank=True, null=True)
+    stripe_price_id = models.CharField(max_length=255, blank=True, null=True)
+    stripe_product_id = models.CharField(max_length=255, blank=True, null=True)
+    
+    # Subscription timeline
+    start_date = models.DateTimeField(auto_now_add=True, null=True, blank=True)
+    current_period_start = models.DateTimeField(null=True, blank=True)
+    current_period_end = models.DateTimeField(null=True, blank=True)
+    trial_start = models.DateTimeField(null=True, blank=True)
+    trial_end = models.DateTimeField(null=True, blank=True)
+    cancel_at_period_end = models.BooleanField(default=False)
+    canceled_at = models.DateTimeField(null=True, blank=True)
+    ended_at = models.DateTimeField(null=True, blank=True)
+    
+    # Metadata
+    created_at = models.DateTimeField(auto_now_add=True, null=True, blank=True)
+    updated_at = models.DateTimeField(auto_now=True, null=True, blank=True)
 
     def __str__(self):
-        return f"{self.user.email} - {self.plan.name} ({self.active_date} to {self.expiry_date})"
+        return f"{self.user.email} - {self.plan_name} ({self.status})"
+    
+    def is_active(self):
+        """Check if subscription is currently active"""
+        from django.utils import timezone
+        return (
+            self.status == 'active' and 
+            self.current_period_end and
+            self.current_period_end > timezone.now()
+        )
+    
+    def is_expired(self):
+        """Check if subscription has expired"""
+        from django.utils import timezone
+        return (
+            self.current_period_end and 
+            self.current_period_end < timezone.now()
+        )
+    
+    def can_add_employee(self):
+        """Check if can add more employees within seat limits"""
+        return self.seats_used < self.seats_limit
+    
+    def days_until_expiry(self):
+        """Get days until subscription expires"""
+        from django.utils import timezone
+        if self.current_period_end and self.current_period_end > timezone.now():
+            delta = self.current_period_end - timezone.now()
+            return delta.days
+        return 0
 
 
-
-# Transaction model
 class Transaction(models.Model):
+    """
+    Comprehensive payment transaction records with all Stripe details.
+    """
+    TRANSACTION_TYPES = [
+        ('subscription', 'Subscription Payment'),
+        ('one_time', 'One-time Payment'),
+        ('refund', 'Refund'),
+        ('upgrade', 'Plan Upgrade'),
+        ('downgrade', 'Plan Downgrade'),
+    ]
+    
+    STATUS_CHOICES = [
+        ('pending', 'Pending'),
+        ('succeeded', 'Succeeded'),
+        ('failed', 'Failed'),
+        ('canceled', 'Canceled'),
+        ('requires_action', 'Requires Action'),
+        ('requires_confirmation', 'Requires Confirmation'),
+        ('requires_payment_method', 'Requires Payment Method'),
+        ('processing', 'Processing'),
+        ('refunded', 'Refunded'),
+        ('partially_refunded', 'Partially Refunded'),
+    ]
+
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="transactions")
     subscription = models.ForeignKey(Subscription, on_delete=models.SET_NULL, null=True, blank=True, related_name="transactions")
-    amount = models.DecimalField(max_digits=10, decimal_places=2)
-    status = models.CharField(max_length=20, default="pending")
+    
+    # Transaction details
+    transaction_type = models.CharField(max_length=20, choices=TRANSACTION_TYPES, default='subscription')
+    amount = models.DecimalField(max_digits=10, decimal_places=2, default=0.00)
+    currency = models.CharField(max_length=3, default='USD')
+    status = models.CharField(max_length=30, choices=STATUS_CHOICES, default="pending")
+    
+    # Payment method details
     payment_method = models.CharField(max_length=20, default="stripe")
-    payment_id = models.CharField(max_length=100, blank=True, null=True, help_text="Stripe charge ID or local bank reference")
+    payment_method_type = models.CharField(max_length=50, blank=True, null=True, help_text="card, bank_transfer, etc.")
+    card_brand = models.CharField(max_length=20, blank=True, null=True, help_text="visa, mastercard, etc.")
+    card_last4 = models.CharField(max_length=4, blank=True, null=True)
+    card_exp_month = models.CharField(max_length=2, blank=True, null=True)
+    card_exp_year = models.CharField(max_length=4, blank=True, null=True)
+    
+    # Stripe IDs for reference and management
+    stripe_payment_intent_id = models.CharField(max_length=255, blank=True, null=True)
+    stripe_charge_id = models.CharField(max_length=255, blank=True, null=True)
+    stripe_invoice_id = models.CharField(max_length=255, blank=True, null=True)
+    stripe_customer_id = models.CharField(max_length=255, blank=True, null=True)
+    
+    # Additional transaction info
+    receipt_email = models.EmailField(blank=True, null=True)
+    receipt_url = models.URLField(blank=True, null=True)
+    failure_code = models.CharField(max_length=100, blank=True, null=True)
+    failure_message = models.TextField(blank=True, null=True)
+    
+    # Refund details
+    refunded_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0.00)
+    refund_reason = models.CharField(max_length=255, blank=True, null=True)
+    
+    # Timestamps
+    stripe_created_at = models.DateTimeField(null=True, blank=True, help_text="Transaction timestamp from Stripe")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
+    class Meta:
+        ordering = ['-created_at']
+
     def __str__(self):
-        return f"{self.user.email} - {self.amount} ({self.status}, {self.payment_method})"
-
-
-
-# {'cardName': ['Usama Kamran'], 'cardNumber': ['0000000000000000'], 'expMonthValue': ['2025-11'], 'exp': ['11/25'], 'cvv': ['123'], 'profileType': ['company'], 'firstName': ['d'], 'lastName': ['d'], 'email': ['d'], 'companyName': ['d'], 'industry': ['Finance'], 'employees': ['1 – 50'], 'bizType': ['sole'], 'address1': ['1'], 'address2': ['1'], 'city': ['1'], 'postCode': ['1'], 'phone': ['1'], 'website': ['1'], 'usState': ['Arizona'], 'subscriptionBilling': ['monthly'], 'subscriptionPlanId': ['0'], 'subscriptionSeats': ['5'], 'paymentType': ['bank']}
+        return f"{self.user.email} - ${self.amount} ({self.status}) - {self.transaction_type}"
+    
+    def is_successful(self):
+        """Check if transaction was successful"""
+        return self.status == 'succeeded'
+    
+    def is_refundable(self):
+        """Check if transaction can be refunded"""
+        return (
+            self.status == 'succeeded' and 
+            self.refunded_amount < self.amount and
+            self.transaction_type not in ['refund']
+        )
 
 
 

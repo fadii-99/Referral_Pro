@@ -127,27 +127,41 @@ CELERY_BROKER_URL = f"redis://{REDIS_HOST}:{REDIS_PORT}/{REDIS_DB}"
 CELERY_RESULT_BACKEND = CELERY_BROKER_URL
 
 # -------------------------
-# AWS S3 Storage
+# AWS S3 Configuration - CORRECTED
 # -------------------------
+# AWS credentials
 AWS_ACCESS_KEY_ID = os.getenv("AWS_ACCESS_KEY_ID")
 AWS_SECRET_ACCESS_KEY = os.getenv("AWS_SECRET_ACCESS_KEY")
-AWS_STORAGE_BUCKET_NAME = os.getenv("AWS_STORAGE_BUCKET_NAME")
+AWS_STORAGE_BUCKET_NAME = os.getenv("AWS_STORAGE_BUCKET_NAME", "referal-pro-bucket")
 AWS_S3_REGION_NAME = os.getenv("AWS_S3_REGION_NAME", "us-east-1")
-AWS_S3_CUSTOM_DOMAIN = os.getenv("AWS_S3_CUSTOM_DOMAIN")
 
-# Use the correct domain format for S3
-if AWS_STORAGE_BUCKET_NAME and not AWS_S3_CUSTOM_DOMAIN:
-    AWS_S3_CUSTOM_DOMAIN = f"{AWS_STORAGE_BUCKET_NAME}.s3.amazonaws.com"
-
-# S3 Configuration
-AWS_DEFAULT_ACL = None  # Use bucket's default ACL
+# Disable ACLs (modern S3 default)
+AWS_DEFAULT_ACL = None
+AWS_QUERYSTRING_AUTH = False
+AWS_S3_FILE_OVERWRITE = False
 AWS_S3_OBJECT_PARAMETERS = {
-    'CacheControl': 'max-age=86400',
+    "CacheControl": "max-age=86400",
 }
-AWS_QUERYSTRING_AUTH = False  # Don't add authentication parameters to URLs
-AWS_S3_FILE_OVERWRITE = False  # Don't overwrite files with the same name
 
-DEFAULT_FILE_STORAGE = "storages.backends.s3boto3.S3Boto3Storage"
+# ❌ Don’t set AWS_S3_CUSTOM_DOMAIN
+# AWS_S3_CUSTOM_DOMAIN = None
+
+# Static files
+STATICFILES_STORAGE = "storages.backends.s3boto3.S3StaticStorage"
+STATIC_URL = f"https://{AWS_STORAGE_BUCKET_NAME}.s3.{AWS_S3_REGION_NAME}.amazonaws.com/static/"
+
+# Media files
+DEFAULT_FILE_STORAGE = "utils.storage_backends.MediaStorage"
+MEDIA_URL = f"https://{AWS_STORAGE_BUCKET_NAME}.s3.{AWS_S3_REGION_NAME}.amazonaws.com/media/"
+# Media files configuration
+DEFAULT_FILE_STORAGE = 'utils.storage_backends.MediaStorage'
+
+
+
+# If AWS credentials are not set, use local file storage
+if not all([AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_STORAGE_BUCKET_NAME]):
+    DEFAULT_FILE_STORAGE = 'django.core.files.storage.FileSystemStorage'
+    MEDIA_URL = '/media/'
 
 # -------------------------
 # Email
@@ -212,19 +226,5 @@ LANGUAGE_CODE = 'en-us'
 TIME_ZONE = 'UTC'
 USE_I18N = True
 USE_TZ = True
-
-# -------------------------
-# Static files & Media files
-# -------------------------
-STATIC_URL = '/static/'
-STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
-
-# Media files configuration
-MEDIA_URL = '/media/'
-MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
-
-# If AWS credentials are not set, use local file storage
-if not all([AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_STORAGE_BUCKET_NAME]):
-    DEFAULT_FILE_STORAGE = 'django.core.storage.FileSystemStorage'
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'

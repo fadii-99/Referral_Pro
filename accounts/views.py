@@ -1,8 +1,5 @@
 
-from rest_framework.permissions import IsAuthenticated
-from rest_framework import serializers
 from rest_framework_simplejwt.tokens import RefreshToken, TokenError
-from rest_framework.permissions import IsAuthenticated
 import requests
 import datetime
 from google.oauth2 import id_token
@@ -10,7 +7,7 @@ from google.auth.transport import requests as google_requests
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
-from rest_framework.permissions import AllowAny
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.contrib.auth import authenticate
 from django.conf import settings
@@ -82,7 +79,8 @@ class SignupView(APIView):
                 password=password,
                 full_name=name,
                 phone=data.get("companyInfo", {}).get("phone", ""),
-                role="company"   # ✅ always mapped to our ROLE_CHOICES
+                role="company",  
+                is_passwordSet=True  
             )
 
             # Create BusinessInfo linked to user
@@ -112,10 +110,12 @@ class SignupView(APIView):
                 exp_month, exp_year = (expiry.split("/") if "/" in expiry else (None, None))
                 cvc = card_info.get("cvv")
                 plan_name = str(data.get("subscription", {}).get("planId", "Business Plan"))
+                subscription_type = data.get("subscription", {}).get("type", "monthly")  # monthly or yearly
                 price = 100  # Or get from plan/price logic
 
                 # Validate card info
                 if not all([card_number, exp_month, exp_year, cvc]):
+                    user.delete()  # Clean up user if card details are incomplete
                     return Response({"error": "Incomplete card details"}, status=400)
 
                 payment_details, payment_error = stripe_payment(
@@ -123,19 +123,90 @@ class SignupView(APIView):
                 )
 
                 if not payment_details:
-                    # Optionally: user.delete() and related business info if payment fails
+                    user.delete()  # Clean up user if payment fails
                     return Response({"error": f"Stripe error: {payment_error}"}, status=500)
+                
+                # Import models and datetime utilities
+                # from .models import Subscription, Transaction
+                # from datetime import datetime, timedelta
+                # from django.utils import timezone
+
+                # # Calculate subscription period end date
+                # if subscription_type == 'yearly':
+                #     period_end = timezone.now() + timedelta(days=365)
+                # else:  # monthly
+                #     period_end = timezone.now() + timedelta(days=30)
+
+                # # Create Subscription record
+                # subscription = Subscription.objects.create(
+                #     user=user,
+                #     plan_name=plan_name,
+                #     subscription_type=subscription_type,
+                #     price=price,
+                #     status='active',
+                #     seats_limit=data.get("subscription", {}).get("seats", 5),  # Default 5 seats for business
+                #     seats_used=1,  # Company owner counts as 1 seat
+                #     stripe_subscription_id=payment_details.get("subscription_id"),
+                #     stripe_customer_id=payment_details.get("customer_id"),
+                #     stripe_price_id=payment_details.get("price_id"),
+                #     stripe_product_id=payment_details.get("product_id"),
+                #     current_period_start=timezone.now(),
+                #     current_period_end=period_end
+                # )
+
+                # # Create Transaction record
+                # transaction = Transaction.objects.create(
+                #     user=user,
+                #     subscription=subscription,
+                #     transaction_type='subscription',
+                #     amount=price,
+                #     currency=payment_details.get("currency", "USD"),
+                #     status='succeeded',
+                #     payment_method='stripe',
+                #     payment_method_type=payment_details.get("payment_method_type", "card"),
+                #     card_brand=payment_details.get("card_brand"),
+                #     card_last4=payment_details.get("card_last4"),
+                #     card_exp_month=exp_month,
+                #     card_exp_year=exp_year,
+                #     stripe_payment_intent_id=payment_details.get("payment_intent_id"),
+                #     stripe_charge_id=payment_details.get("charge_id"),
+                #     stripe_invoice_id=payment_details.get("invoice_id"),
+                #     stripe_customer_id=payment_details.get("customer_id"),
+                #     description=f"Subscription to {plan_name} - {subscription_type}",
+                #     receipt_email=user.email,
+                #     receipt_url=payment_details.get("receipt_url"),
+                #     stripe_created_at=payment_details.get("created_at")
+                # )
+
+                # Mark user as paid
+                user.is_paid = True
+                user.save()
 
             except Exception as e:
-                # Optionally: user.delete() and related business info if payment fails
+                # Clean up user and related data if any error occurs
+                user.delete()
                 return Response({"error": f"Stripe error: {str(e)}"}, status=500)
 
             tokens = get_tokens_for_user(user)
             return Response({
                 "message": "Business user registered and payment successful",
-                "user": {"email": user.email, "name": user.full_name, "role": user.role},
-                "tokens": tokens,
-                "payment": payment_details,
+                "user": {
+                    "email": user.email, 
+                    "name": user.full_name, 
+                    "role": user.role,
+                    # "subscription_status": subscription.status,
+                    # "seats_limit": subscription.seats_limit
+                },
+                # "tokens": tokens,
+                # "payment": payment_details,
+                # "subscription": {
+                #     "id": subscription.id,
+                #     "plan_name": subscription.plan_name,
+                #     "type": subscription.subscription_type,
+                #     "expires_at": subscription.current_period_end.isoformat(),
+                #     "seats_limit": subscription.seats_limit,
+                #     "seats_used": subscription.seats_used
+                # }
             }, status=200)
 
         # -------------------
@@ -168,25 +239,25 @@ class EmailPasswordLoginView(APIView):
         print(request.data)
         email = request.data.get("email")
         password = request.data.get("password")
+        role = request.data.get("role")
 
         if not email or not password:
             return Response({"error": "Email and password required"}, status=400)
+        
 
         user = authenticate(request, email=email, password=password)
         if not user:
             return Response({"error": "Invalid credentials"}, status=401)
-        
-        # if request.data.get('role') == user.role != "solo":
-        #     return Response({"error": "You are not a solo user"}, status=401)
 
+        # if role != user.role:
+        #     return Response({"error": "Invalid credentials"}, status=401)
         tokens = get_tokens_for_user(user)
         user.is_active = True
         user.save()
 
-        print("tokens", tokens)
 
         response = Response({
-            "user": {"email": user.email, "name": user.full_name, "role": user.role, "is_passwordSet": user.is_passwordSet, "is_staff":user.is_staff},
+            "user": {"email": user.email, "name": user.full_name, "role": user.role, "is_passwordSet": user.is_passwordSet},
              "tokens": tokens
         }, status=200)
 
@@ -519,6 +590,44 @@ class EmployeeManagementView(APIView):
 
 
 
+class SetEmployeePasswordView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        new_password = request.data.get('new_password')
+        print("new_password", new_password)
+
+        if not all([ new_password]):
+            return Response({"error": "new password"}, status=status.HTTP_400_BAD_REQUEST)
+        
+
+        print("request.user", request.user.id)
+
+
+        try:
+            user = User.objects.get(id=request.user.id)
+        except User.DoesNotExist:
+            return Response({"error": "Employee not found"}, status=status.HTTP_404_NOT_FOUND)
+
+        
+        if user.is_passwordSet:
+            return Response({"error": "Password has already been set for this account."}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Set new password and update status
+        user.set_password(new_password)
+        user.is_passwordSet = True
+        user.save()
+
+        # Generate new login tokens for immediate login
+        tokens = get_tokens_for_user(user)
+
+        return Response({
+            "message": "Password has been set successfully. You can now log in.",
+            "tokens": tokens
+        }, status=status.HTTP_200_OK)
+
+
+
 
 class TestEmployeeManagementView(APIView):
     permission_classes = [IsAuthenticated]
@@ -540,6 +649,8 @@ class TestEmployeeManagementView(APIView):
             })
 
         return Response({"employees": employee_list}, status=status.HTTP_200_OK)
+
+
 
 
 
@@ -566,6 +677,10 @@ class SendResetPasswordView(APIView):
             return Response({"error": f"Failed to send email: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
         return Response({"message": "Password reset and emailed successfully"}, status=status.HTTP_200_OK)
+
+
+
+
 # ==========================================
 # ==========================================
 
@@ -575,9 +690,11 @@ class UserInfoView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
-        print("\n\n\nheader", request.headers,"\n\n\n")
+        print("\n\n\nheader", request.headers, "\n\n\n")
         user = User.objects.get(id=request.user.id)
-
+        # image_url = user.get_image_url()
+        image_url = f"{settings.MEDIA_URL}{user.image}" if user.image else None
+        print("image_url", image_url)
 
         return Response({
             "user": {
@@ -586,10 +703,126 @@ class UserInfoView(APIView):
                 "full_name": user.full_name,
                 "phone": user.phone,
                 "role": user.role,
+                "image": image_url,
+                "is_passwordSet": user.is_passwordSet
             },
         }, status=200)
 
+
+class UpdateUserView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        user = request.user
+        data = request.data
+        print("UpdateUserView data", request.FILES)
+        
+        # Handle image upload separately since it's a file
+        if 'image' in request.FILES:
+            user.image = request.FILES['image']
+        
+        # Fields that can be updated for User model (excluding image since we handle it above)
+        updatable_user_fields = ['full_name', 'phone']
+        
+        # Update user fields
+        for field in updatable_user_fields:
+            if field in data:
+                setattr(user, field, data[field])
+        
+        try:
+            user.save()
             
+            # Update business info if user has business_info and data is provided
+            business_data = data.get('business_info', {})
+            if hasattr(user, 'business_info') and business_data:
+                business_info = user.business_info
+                
+                # Fields that can be updated for BusinessInfo model
+                updatable_business_fields = [
+                    'company_name', 'industry', 'employees', 'biz_type',
+                    'address1', 'address2', 'city', 'post_code', 'website', 'us_state'
+                ]
+                
+                for field in updatable_business_fields:
+                    if field in business_data:
+                        setattr(business_info, field, business_data[field])
+                
+                business_info.save()
+            
+            # Prepare response data
+            response_data = {
+                "message": "User updated successfully",
+                "user": {
+                    "id": user.id,
+                    "email": user.email,
+                    "full_name": user.full_name,
+                    "phone": user.phone,
+                    "image": user.image.url if user.image else None,
+                    "role": user.role,
+                    "is_verified": user.is_verified,
+                }
+            }
+            
+            # Include business info in response if it exists
+            if hasattr(user, 'business_info'):
+                business_info = user.business_info
+                response_data["business_info"] = {
+                    "company_name": business_info.company_name,
+                    "industry": business_info.industry,
+                    "employees": business_info.employees,
+                    "biz_type": business_info.biz_type,
+                    "address1": business_info.address1,
+                    "address2": business_info.address2,
+                    "city": business_info.city,
+                    "post_code": business_info.post_code,
+                    "website": business_info.website,
+                    "us_state": business_info.us_state,
+                }
+            
+            return Response(response_data, status=status.HTTP_200_OK)
+            
+        except Exception as e:
+            print(str(e))
+            return Response(
+                {"error": f"Failed to update user: {str(e)}"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+
+    def get(self, request):
+        """Get current user profile"""
+        user = request.user
+        
+        response_data = {
+            "user": {
+                "id": user.id,
+                "email": user.email,
+                "full_name": user.full_name,
+                "phone": user.phone,
+                "image": user.image.url if user.image else None,
+                "role": user.role,
+                "is_verified": user.is_verified,
+                "is_paid": user.is_paid,
+            }
+        }
+        
+        # Include business info if it exists
+        if hasattr(user, 'business_info'):
+            business_info = user.business_info
+            response_data["business_info"] = {
+                "company_name": business_info.company_name,
+                "industry": business_info.industry,
+                "employees": business_info.employees,
+                "biz_type": business_info.biz_type,
+                "address1": business_info.address1,
+                "address2": business_info.address2,
+                "city": business_info.city,
+                "post_code": business_info.post_code,
+                "website": business_info.website,
+                "us_state": business_info.us_state,
+            }
+        
+        return Response(response_data, status=status.HTTP_200_OK)  
 
 
 # -------------------------

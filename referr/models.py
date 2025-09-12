@@ -42,6 +42,8 @@ class Referral(models.Model):
     status = models.CharField(
         max_length=20, choices=STATUS_CHOICES, default="pending"
     )
+    referred_by_approval = models.BooleanField(default=False)
+    company_approval = models.BooleanField(default=False)
     reward_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0.00)
 
     created_at = models.DateTimeField(auto_now_add=True)
@@ -54,3 +56,25 @@ class Referral(models.Model):
         if not self.reference_id:
             self.reference_id = f"REF-{uuid.uuid4().hex[:8].upper()}"
         super().save(*args, **kwargs)
+
+
+
+class ReferralAssignment(models.Model):
+    referral = models.ForeignKey(
+        Referral,
+        on_delete=models.CASCADE,
+        related_name="assignments"
+    )
+    assigned_to = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name="assigned_referrals",
+        null=True, blank=True
+    )
+    assigned_at = models.DateTimeField(auto_now_add=True)
+    notes = models.TextField(blank=True, null=True)
+   
+
+
+
+
