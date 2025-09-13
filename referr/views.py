@@ -32,32 +32,33 @@ class ListCompaniesView(APIView):
                 "full_name": company.full_name,
                 "phone": company.phone,
                 "image": company.image.url if company.image else None,
-                "is_favorite": company.id in favorite_company_ids,
+                "is_favorite": company.id in favorite_company_ids
             }
-            
-            # Include business info if available
             if hasattr(company, 'business_info'):
                 business_info = company.business_info
-                company_data["business_info"] = {
+                company_data.update({
                     "company_name": business_info.company_name,
                     "industry": business_info.industry,
                     "employees": business_info.employees,
-                    "biz_type": business_info.biz_type,
+                    "business_type": business_info.biz_type,
                     "address1": business_info.address1,
                     "address2": business_info.address2,
                     "city": business_info.city,
                     "post_code": business_info.post_code,
                     "website": business_info.website,
                     "us_state": business_info.us_state,
-                }
+                })
             
             companies_list.append(company_data)
+
         
         return Response({
             "message": "Companies retrieved successfully",
             "companies": companies_list,
             "total": len(companies_list)
         }, status=status.HTTP_200_OK)
+
+
 
 
 
@@ -89,8 +90,8 @@ class SendReferralView(APIView):
             )
 
         try:
-            company = BusinessInfo.objects.get(id=company_id)
-            COMPANY = User.objects.get(id=company.user.id)
+            # company = BusinessInfo.objects.get(id=company_id)
+            COMPANY = User.objects.get(id=company_id)
         except BusinessInfo.DoesNotExist:
             return Response({"error": "Company not found"}, status=status.HTTP_404_NOT_FOUND)
 
@@ -169,8 +170,8 @@ class AssignRepView(APIView):
             message = "Referral assigned successfully"
 
         # Update referral status
-        referral_obj.status = 'in_progress'
-        referral_obj.approval = referral_status
+        referral_obj.status = "cancelled" if referral_status == "reject" else "in_progress"
+        referral_obj.company_approval = True if referral_status == "accept" else False
         referral_obj.save()
 
         return Response(
@@ -249,7 +250,10 @@ class ListSoloReferralView(APIView):
                 "notes": referral.notes,
                 "privacy": referral.privacy_opted,
                 "referred_by_approval": referral.referred_by_approval,
+                "referral_type": request.data.get("referral_type"),
             })
+
+        print(referral_list)
 
         return Response(
             {
@@ -267,17 +271,20 @@ class UpdateReferralPrivacyView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
+        print(request.data)
         referral_id = request.data.get("referral_id")
         privacy_status = request.data.get("privacy")
         
         # Validate required fields
         if referral_id is None:
+            print("Referral ID is missing")
             return Response(
                 {"error": "referral_id is required"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
         
         if privacy_status is None:
+            print("Privacy status is missing")
             return Response(
                 {"error": "privacy status is required"},
                 status=status.HTTP_400_BAD_REQUEST,
@@ -581,6 +588,7 @@ class SendAcceptView(APIView):
 
     def post(self, request):
         referral_id = request.data.get("referral_id")
+        approval = request.data.get("approval")
         if not referral_id:
             return Response(
                 {"error": "referral_id is required"},
@@ -591,6 +599,19 @@ class SendAcceptView(APIView):
             referral = Referral.objects.get(id=referral_id)
         except Referral.DoesNotExist:
             return Response({"error": "Referral not found"}, status=status.HTTP_404_NOT_FOUND)
+        
+        if approval not in [True, False]:
+            return Response(
+                {"error": "approval must be true or false"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        referral.referred_by_approval = approval
+        referral.status = "Friend opted in" if approval else "cancelled"
+        referral.save()
+
+        ra = ReferralAssignment.objects.get(referral_id=referral.id)
+        ra.status = "in_progress" if approval else "cancelled"
+        ra.save()
 
         # Check assignment exists
         assignment = referral.assignments.last()
