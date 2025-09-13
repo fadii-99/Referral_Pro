@@ -15,6 +15,9 @@ def send_otp(email: str, otp_code: str, purpose: str, expires_in: int):
         'expires_in': expires_in
     })
 
+
+    
+
     # Also make a plain-text fallback (for clients that can’t render HTML)
     text_content = f"Your OTP for {purpose} is {otp_code}. It will expire in {expires_in} minutes."
 

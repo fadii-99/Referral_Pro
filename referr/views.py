@@ -60,11 +60,6 @@ class ListCompaniesView(APIView):
 
 
 
-
-
-
-
-
  
 
 class SendReferralView(APIView):
@@ -587,6 +582,7 @@ class SendAcceptView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
+        print(request.data)
         referral_id = request.data.get("referral_id")
         approval = request.data.get("approval")
         if not referral_id:
@@ -609,26 +605,9 @@ class SendAcceptView(APIView):
         referral.status = "Friend opted in" if approval else "cancelled"
         referral.save()
 
-        ra = ReferralAssignment.objects.get(referral_id=referral.id)
-        ra.status = "in_progress" if approval else "cancelled"
-        ra.save()
 
-        # Check assignment exists
-        assignment = referral.assignments.last()
-        if not assignment:
-            return Response({"error": "Referral not assigned"}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Check that the logged-in user is the assigned employee
-        if assignment.assigned_to != request.user:
-            return Response({"error": "You are not assigned to this referral"}, status=status.HTTP_403_FORBIDDEN)
-
-        # Update both referral and assignment statuses
-        referral.status = "completed"
-        referral.save()
-        assignment.status = "completed"
-        assignment.save()
-
-        return Response({"message": "Referral marked as completed"}, status=status.HTTP_200_OK)
+        return Response({"message": "Referral Accepted"}, status=status.HTTP_200_OK)
 
 
 
