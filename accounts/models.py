@@ -287,5 +287,28 @@ class Transaction(models.Model):
         )
 
 
+class FavoriteCompany(models.Model):
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="favorite_companies")
+    company = models.ForeignKey(
+        User, 
+        on_delete=models.CASCADE, 
+        related_name="favorited_by",
+        limit_choices_to={"role": "company"}
+    )
+    added_at = models.DateTimeField(auto_now_add=True)
+    notes = models.TextField(blank=True, null=True, help_text="Optional notes about this favorite company")
+
+    class Meta:
+        unique_together = ('user', 'company')  # Prevent duplicate favorites
+        ordering = ['-added_at']
+        verbose_name = "Favorite Company"
+        verbose_name_plural = "Favorite Companies"
+
+    def __str__(self):
+        company_name = getattr(self.company.business_info, 'company_name', self.company.email) if hasattr(self.company, 'business_info') else self.company.email
+        return f"{self.user.email} -> {company_name}"
+
+
+
 
 

@@ -13,7 +13,8 @@ from .views import (
     SendResetPasswordView,
     TestEmployeeManagementView,
     UpdateUserView,
-    SetEmployeePasswordView
+    SetEmployeePasswordView,
+    FavoriteCompanyView
 )
 
 urlpatterns = [
@@ -36,6 +37,7 @@ urlpatterns = [
     path('set_employee_password/', SetEmployeePasswordView.as_view(), name='set-employee-password'),
     path('employee_reset_password/<int:id>/', SendResetPasswordView.as_view(), name='send_reset_password'),
 
+    path('favourite/', FavoriteCompanyView.as_view(), name='send_invite'),
     # Delete user by email
     path('delete/<int:id>/', DeleteUserView.as_view(), name='delete_user'),
 

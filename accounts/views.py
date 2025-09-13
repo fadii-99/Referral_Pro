@@ -1,4 +1,3 @@
-
 from rest_framework_simplejwt.tokens import RefreshToken, TokenError
 import requests
 import datetime
@@ -12,7 +11,7 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from django.contrib.auth import authenticate
 from django.conf import settings
 import jwt
-from .models import User
+from .models import User, FavoriteCompany
 from utils.email_service import send_otp, send_invitation_email
 from utils.otp_utils import generate_otp, verify_otp
 from utils.twilio_service import TwilioService
@@ -257,7 +256,7 @@ class EmailPasswordLoginView(APIView):
 
 
         response = Response({
-            "user": {"email": user.email, "name": user.full_name, "role": user.role, "is_passwordSet": user.is_passwordSet},
+            "user": {"email": user.email, "name": user.full_name, "role": user.role, "is_passwordSet": user.is_passwordSet, "is_paid": user.is_paid},
              "tokens": tokens
         }, status=200)
 
@@ -704,7 +703,8 @@ class UserInfoView(APIView):
                 "phone": user.phone,
                 "role": user.role,
                 "image": image_url,
-                "is_passwordSet": user.is_passwordSet
+                "is_passwordSet": user.is_passwordSet,
+                "is_paid": user.is_paid
             },
         }, status=200)
 
@@ -825,6 +825,8 @@ class UpdateUserView(APIView):
         return Response(response_data, status=status.HTTP_200_OK)  
 
 
+
+
 # -------------------------
 # Delete User by Email
 # -------------------------
@@ -861,5 +863,63 @@ class LogoutView(APIView):
             return Response({"message": "Logout successful."}, status=200)
         except TokenError:
             return Response({"error": "Invalid or expired token."}, status=400)
+
+
+class FavoriteCompanyView(APIView):
+    permission_classes = [IsAuthenticated]
+
+
+    def post(self, request):
+        """Add a company to favorites"""
+        company_id = request.data.get('company_id')
+        
+        if not company_id:
+            return Response({"error": "Company ID is required"}, status=status.HTTP_400_BAD_REQUEST)
+        
+        try:
+            company = User.objects.get(id=company_id, role='company')
+        except User.DoesNotExist:
+            return Response({"error": "Company not found"}, status=status.HTTP_404_NOT_FOUND)
+        
+
+
+        # Don't allow users to favorite themselves
+        if request.user == company:
+            return Response({"error": "You cannot add yourself to favorites"}, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Check if already favorited
+        favorite_exists = FavoriteCompany.objects.filter(user=request.user, company=company)
+        if favorite_exists.exists():
+            favorite_exists.delete()
+            return Response({"message": "Company removed from favorites"}, status=status.HTTP_200_OK)
+        
+        
+        # Create favorite
+        favorite = FavoriteCompany.objects.create(
+            user=request.user,
+            company=company,
+        )
+        
+        
+        return Response({
+            "message": "Company added to favorites successfully",
+        }, status=status.HTTP_201_CREATED)
+
+
+    def delete(self, request):
+        """Remove a company from favorites"""
+        company_id = request.data.get('company_id')
+        
+        if not company_id:
+            return Response({"error": "Company ID is required"}, status=status.HTTP_400_BAD_REQUEST)
+        
+        try:
+            favorite = FavoriteCompany.objects.get(user=request.user, company_id=company_id)
+            favorite.delete()
+            return Response({"message": "Company removed from favorites successfully"}, status=status.HTTP_200_OK)
+        except FavoriteCompany.DoesNotExist:
+            return Response({"error": "Favorite not found"}, status=status.HTTP_404_NOT_FOUND)
+
+
 
 

@@ -5,43 +5,62 @@ from rest_framework.permissions import IsAuthenticated
 from accounts.models import BusinessInfo
 from rest_framework import status
 from .models import Referral, ReferralAssignment
-from accounts.models import User, BusinessInfo
+from accounts.models import User, BusinessInfo, FavoriteCompany
 from utils.email_service import send_app_download_email
 from utils.twilio_service import TwilioService
 
 
 
-class CompaniesListView(APIView):
+
+class ListCompaniesView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        companies = BusinessInfo.objects.select_related('user').all()
+        """List all companies with favorite status for current user"""
+        companies = User.objects.filter(role='company').select_related('business_info')
+        
+        # Get user's favorite company IDs
+        favorite_company_ids = set(
+            FavoriteCompany.objects.filter(user=request.user).values_list('company_id', flat=True)
+        )
+        
         companies_list = []
-        
         for company in companies:
-            # Get company image from the associated user
-            company_image = None
-            if company.user.image:
-                company_image = company.user.image.url
-            
-            # If company_name is None or empty, use full_name from user table
-            display_name = company.company_name
-            if not display_name:
-                display_name = company.user.full_name or "Unknown Company"
-            
-            companies_list.append({
+            company_data = {
                 "id": company.id,
-                "company_name": display_name,
-                "image": company_image,
-                "business_type": company.biz_type,
-                "industry": company.industry,
-                "rating": 4.2, 
-                "city": company.city,
-                "category": company.industry
-            })
-
+                "email": company.email,
+                "full_name": company.full_name,
+                "phone": company.phone,
+                "image": company.image.url if company.image else None,
+                "is_favorite": company.id in favorite_company_ids,
+            }
+            
+            # Include business info if available
+            if hasattr(company, 'business_info'):
+                business_info = company.business_info
+                company_data["business_info"] = {
+                    "company_name": business_info.company_name,
+                    "industry": business_info.industry,
+                    "employees": business_info.employees,
+                    "biz_type": business_info.biz_type,
+                    "address1": business_info.address1,
+                    "address2": business_info.address2,
+                    "city": business_info.city,
+                    "post_code": business_info.post_code,
+                    "website": business_info.website,
+                    "us_state": business_info.us_state,
+                }
+            
+            companies_list.append(company_data)
         
-        return Response({"companies": companies_list}, status=status.HTTP_200_OK)
+        return Response({
+            "message": "Companies retrieved successfully",
+            "companies": companies_list,
+            "total": len(companies_list)
+        }, status=status.HTTP_200_OK)
+
+
+
 
 
 
@@ -167,16 +186,21 @@ class AssignRepView(APIView):
 
 
 
-
  
 class ListSoloReferralView(APIView):
     permission_classes = [IsAuthenticated]
 
-    def get(self, request):
-        print(request.user)
-        referrals = Referral.objects.filter(referred_by=request.user.id).select_related(
-            'referred_to', 'company', 'company__business_info'
-        )
+    def post(self, request):
+        print(request.data)
+        referrals = None
+        if request.data.get("referral_type") == "referred_by":
+            referrals = Referral.objects.filter(referred_by=request.user.id).select_related(
+                'referred_to', 'company', 'company__business_info'
+            )
+        elif request.data.get("referral_type") == "referred_to":
+            referrals = Referral.objects.filter(referred_to=request.user.id).select_related(
+                'referred_to', 'company', 'company__business_info'
+            )
         referral_list = []
         for referral in referrals:  
             # Get company information
@@ -212,6 +236,8 @@ class ListSoloReferralView(APIView):
                 "reference_id": referral.reference_id,
                 "referred_to_email": referral.referred_to.email,
                 "referred_to_name": referral.referred_to.full_name,
+                "referred_by_email": referral.referred_by.email,
+                "referred_by_name": referral.referred_by.full_name,
                 "industry": industry,
                 "company_name": display_name,
                 "company_type": company_type,
@@ -233,6 +259,58 @@ class ListSoloReferralView(APIView):
             status=status.HTTP_200_OK,
         )
     
+
+
+
+
+class UpdateReferralPrivacyView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        referral_id = request.data.get("referral_id")
+        privacy_status = request.data.get("privacy")
+        
+        # Validate required fields
+        if referral_id is None:
+            return Response(
+                {"error": "referral_id is required"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        
+        if privacy_status is None:
+            return Response(
+                {"error": "privacy status is required"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        
+        # Validate privacy status is boolean
+        if not isinstance(privacy_status, bool):
+            return Response(
+                {"error": "privacy must be a boolean value (true/false)"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            # Get the referral and ensure it belongs to the authenticated user
+            referral = Referral.objects.get(id=referral_id, referred_by=request.user)
+        except Referral.DoesNotExist:
+            return Response(
+                {"error": "Referral not found or you don't have permission to update it"},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        # Update the privacy status
+        referral.privacy_opted = privacy_status
+        referral.save()
+
+        return Response(
+            {
+                "message": "Privacy status updated successfully",
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
 
 
 class ListReferralView(APIView):
@@ -276,7 +354,6 @@ class ListReferralView(APIView):
             referral_list.append({
                 "id": referral.id,
                 "reference_id": referral.reference_id,
-                "reference_id": referral.reference_id,
                 "referred_to_email": referral.referred_to.email,
                 "referred_to_name": referral.referred_to.full_name,
                 "industry": industry,
@@ -308,7 +385,7 @@ class ListCompanyReferralView(APIView):
     def post(self, request):
         print(request.data)
         if request.data.get("referral_id"):
-            referrals = Referral.objects.filter(id=request.data.get("referral_id"), company=request.user)
+            referrals = Referral.objects.filter(reference_id=request.data.get("referral_id"), company=request.user)
         else:
             referrals = Referral.objects.filter(company=request.user)
 
@@ -468,8 +545,13 @@ class ListRepReferralView(APIView):
             
             referral_list.append({
                 "id": referral.id,
+                "reference_id": referral.reference_id,
+                "referred_to_id": referral.referred_to.id,
                 "referred_to_email": referral.referred_to.email,
                 "referred_to_name": referral.referred_to.full_name,
+                "referred_by_id": referral.referred_by.id,
+                "referred_by_email": referral.referred_by.email,
+                "referred_by_name": referral.referred_by.full_name,
                 "industry": industry,
                 "company_name": display_name,
                 "company_type": company_type,
@@ -534,6 +616,7 @@ class CompleteReferralView(APIView):
 
     def post(self, request):
         referral_id = request.data.get("referral_id")
+        status_value = request.data.get("status", "completed")
         if not referral_id:
             return Response(
                 {"error": "referral_id is required"},
@@ -555,9 +638,9 @@ class CompleteReferralView(APIView):
             return Response({"error": "You are not assigned to this referral"}, status=status.HTTP_403_FORBIDDEN)
 
         # Update both referral and assignment statuses
-        referral.status = "completed"
+        referral.status = status_value
         referral.save()
-        assignment.status = "completed"
+        assignment.status = status_value
         assignment.save()
 
         return Response({"message": "Referral marked as completed"}, status=status.HTTP_200_OK)
