@@ -1,11 +1,15 @@
-# referr/views.py
+# rest framework
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
-from accounts.models import BusinessInfo
 from rest_framework import status
+
+# models
+from accounts.models import BusinessInfo
 from .models import Referral, ReferralAssignment
 from accounts.models import User, BusinessInfo, FavoriteCompany
+
+# utils
 from utils.email_service import send_app_download_email
 from utils.twilio_service import TwilioService
 
@@ -442,12 +446,14 @@ class ListCompanyReferralView(APIView):
                 "referred_to_email": referral.referred_to.email,
                 "referred_to_name": referral.referred_to.full_name,
                 "referred_to_phone": referral.referred_to.phone,
+                 "referred_by_email": referral.referred_by.email,
+                "referred_by_name": referral.referred_by.full_name,
                 "industry": industry,
                 "company_name": display_name,
                 "company_type": company_type,
                 "company_approval": referral.company_approval,
                 "referred_by_approval": referral.referred_by_approval,
-                "referral_progress_status": referral.status,
+                "status": referral.status,
                 "date": referral.created_at.strftime("%d %b %Y") if referral.created_at else None,
                 "company_image": company_image,
                 "reason": referral.service_type,

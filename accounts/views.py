@@ -1,23 +1,39 @@
+# django
+from django.contrib.auth import authenticate
+from django.conf import settings
+from django.utils import timezone
+from django.utils.timezone import localtime
+
+# rest framework
 from rest_framework_simplejwt.tokens import RefreshToken, TokenError
-import requests
-import datetime
-from google.oauth2 import id_token
-from google.auth.transport import requests as google_requests
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework_simplejwt.tokens import RefreshToken
-from django.contrib.auth import authenticate
-from django.conf import settings
-import jwt
+
+# models
 from .models import User, FavoriteCompany
-from utils.email_service import send_otp, send_invitation_email
+from .models import Subscription, Transaction
+
+# utils
 from utils.otp_utils import generate_otp, verify_otp
 from utils.twilio_service import TwilioService
+from utils.email_service import send_otp, send_invitation_email, send_company_signup_email, send_payment_failed_email, send_payment_success_email, send_solo_signup_success_email
+
+# google auth
+from google.oauth2 import id_token
+from google.auth.transport import requests as google_requests
+
+# other
+import requests
+import datetime
 import secrets
 import string
-from django.utils.timezone import localtime
+import jwt
+from datetime import datetime, timedelta
+
+
 
 def generate_random_password(length=10):
     chars = string.digits + string.ascii_uppercase + string.ascii_lowercase
@@ -100,6 +116,8 @@ class SignupView(APIView):
             user.parent_company = user  # Self-reference for parent_company
             user.save()
 
+            send_company_signup_email(user.email, user.full_name)
+
             # Now start Stripe payment (after DB records are stored)
             try:
                 # Get card details from request data
@@ -122,64 +140,72 @@ class SignupView(APIView):
                 )
 
                 if not payment_details:
+                    send_payment_failed_email(user.email, user.full_name, payment_error)
                     user.delete()  # Clean up user if payment fails
                     return Response({"error": f"Stripe error: {payment_error}"}, status=500)
                 
-                # Import models and datetime utilities
-                # from .models import Subscription, Transaction
-                # from datetime import datetime, timedelta
-                # from django.utils import timezone
+               
 
-                # # Calculate subscription period end date
-                # if subscription_type == 'yearly':
-                #     period_end = timezone.now() + timedelta(days=365)
-                # else:  # monthly
-                #     period_end = timezone.now() + timedelta(days=30)
+                # Calculate subscription period end date
+                if subscription_type == 'yearly':
+                    period_end = timezone.now() + timedelta(days=365)
+                else:  # monthly
+                    period_end = timezone.now() + timedelta(days=30)
 
-                # # Create Subscription record
-                # subscription = Subscription.objects.create(
-                #     user=user,
-                #     plan_name=plan_name,
-                #     subscription_type=subscription_type,
-                #     price=price,
-                #     status='active',
-                #     seats_limit=data.get("subscription", {}).get("seats", 5),  # Default 5 seats for business
-                #     seats_used=1,  # Company owner counts as 1 seat
-                #     stripe_subscription_id=payment_details.get("subscription_id"),
-                #     stripe_customer_id=payment_details.get("customer_id"),
-                #     stripe_price_id=payment_details.get("price_id"),
-                #     stripe_product_id=payment_details.get("product_id"),
-                #     current_period_start=timezone.now(),
-                #     current_period_end=period_end
-                # )
+                # Create Subscription record
+                subscription = Subscription.objects.create(
+                    user=user,
+                    plan_name=plan_name,
+                    subscription_type=subscription_type,
+                    price=price,
+                    status='active',
+                    seats_limit=data.get("subscription", {}).get("seats", 5),  # Default 5 seats for business
+                    seats_used=1,  # Company owner counts as 1 seat
+                    stripe_subscription_id=payment_details.get("subscription_id"),
+                    stripe_customer_id=payment_details.get("customer_id"),
+                    stripe_price_id=payment_details.get("price_id"),
+                    stripe_product_id=payment_details.get("product_id"),
+                    current_period_start=timezone.now(),
+                    current_period_end=period_end
+                )
 
-                # # Create Transaction record
-                # transaction = Transaction.objects.create(
-                #     user=user,
-                #     subscription=subscription,
-                #     transaction_type='subscription',
-                #     amount=price,
-                #     currency=payment_details.get("currency", "USD"),
-                #     status='succeeded',
-                #     payment_method='stripe',
-                #     payment_method_type=payment_details.get("payment_method_type", "card"),
-                #     card_brand=payment_details.get("card_brand"),
-                #     card_last4=payment_details.get("card_last4"),
-                #     card_exp_month=exp_month,
-                #     card_exp_year=exp_year,
-                #     stripe_payment_intent_id=payment_details.get("payment_intent_id"),
-                #     stripe_charge_id=payment_details.get("charge_id"),
-                #     stripe_invoice_id=payment_details.get("invoice_id"),
-                #     stripe_customer_id=payment_details.get("customer_id"),
-                #     description=f"Subscription to {plan_name} - {subscription_type}",
-                #     receipt_email=user.email,
-                #     receipt_url=payment_details.get("receipt_url"),
-                #     stripe_created_at=payment_details.get("created_at")
-                # )
+                # Create Transaction record
+                transaction = Transaction.objects.create(
+                    user=user,
+                    subscription=subscription,
+                    transaction_type='subscription',
+                    amount=price,
+                    currency=payment_details.get("currency", "USD"),
+                    status='succeeded',
+                    payment_method='stripe',
+                    payment_method_type=payment_details.get("payment_method_type", "card"),
+                    card_brand=payment_details.get("card_brand"),
+                    card_last4=payment_details.get("card_last4"),
+                    card_exp_month=exp_month,
+                    card_exp_year=exp_year,
+                    stripe_payment_intent_id=payment_details.get("payment_intent_id"),
+                    stripe_charge_id=payment_details.get("charge_id"),
+                    stripe_invoice_id=payment_details.get("invoice_id"),
+                    stripe_customer_id=payment_details.get("customer_id"),
+                    description=f"Subscription to {plan_name} - {subscription_type}",
+                    receipt_email=user.email,
+                    receipt_url=payment_details.get("receipt_url"),
+                    stripe_created_at=payment_details.get("created_at")
+                )
 
                 # Mark user as paid
                 user.is_paid = True
                 user.save()
+
+                send_payment_success_email(
+                    user.email,
+                    user.full_name,
+                    plan_name,
+                    price,
+                    payment_details.get("currency", "USD"),
+                    period_end.strftime("%Y-%m-%d"),
+                    payment_details.get("receipt_url")
+                )
 
             except Exception as e:
                 # Clean up user and related data if any error occurs
@@ -187,6 +213,9 @@ class SignupView(APIView):
                 return Response({"error": f"Stripe error: {str(e)}"}, status=500)
 
             tokens = get_tokens_for_user(user)
+
+            send_solo_signup_success_email(user.email, user.full_name)
+
             return Response({
                 "message": "Business user registered and payment successful",
                 "user": {
@@ -239,17 +268,22 @@ class EmailPasswordLoginView(APIView):
         email = request.data.get("email")
         password = request.data.get("password")
         role = request.data.get("role")
+        typee = request.data.get("typee")
 
         if not email or not password:
             return Response({"error": "Email and password required"}, status=400)
+        
+        if typee == "web":
+            role = "company"
         
 
         user = authenticate(request, email=email, password=password)
         if not user:
             return Response({"error": "Invalid credentials"}, status=401)
 
-        # if role != user.role:
-        #     return Response({"error": "Invalid credentials"}, status=401)
+        if role != user.role:
+            return Response({"error": "Invalid credentials"}, status=401)
+        
         tokens = get_tokens_for_user(user)
         user.is_active = True
         user.save()

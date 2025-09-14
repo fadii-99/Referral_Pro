@@ -4,6 +4,8 @@ from django.template.loader import render_to_string
 from django.core.mail import EmailMultiAlternatives
 
 
+support_url = "https://thereferralpro.com/contact"
+
 def send_otp(email: str, otp_code: str, purpose: str, expires_in: int):
     subject = "Your ReferralPro OTP Code"
     from_email = settings.DEFAULT_FROM_EMAIL
@@ -107,6 +109,141 @@ def send_app_download_email(email: str, name: str,  sender_name: str = None):
     msg.send()
 
     print(f"App download invitation email sent to {email}")
+
+
+def send_solo_signup_success_email(email: str, name: str):
+    subject = "Welcome to ReferralPro!"
+    from_email = settings.DEFAULT_FROM_EMAIL
+
+    html_content = render_to_string('solo_signup_success.html', {
+        'name': name,
+        'email': email,
+        'login_url': 'https://thereferralpro.com/login',
+    })
+
+    text_content = f"""
+    Hi {name},
+
+    Your ReferralPro account has been created successfully!
+
+    You can log in now using your email: {email}.
+    Visit: https://thereferralpro.com/login
+
+    Welcome aboard!
+    - ReferralPro Team
+    """
+
+    msg = EmailMultiAlternatives(subject, text_content, from_email, [email])
+    msg.attach_alternative(html_content, "text/html")
+    msg.send()
+
+    print(f"Solo signup success email sent to {email}")
+
+
+def send_company_signup_email(email: str, name: str):
+    subject = "Welcome to ReferralPro for Business"
+    from_email = settings.DEFAULT_FROM_EMAIL
+
+    html_content = render_to_string('company_signup.html', {
+        'name': name,
+        'email': email,
+        'dashboard_url': 'https://thereferralpro.com',
+    })
+
+    text_content = f"""
+    Hi {name},
+
+    Your company account has been successfully created on ReferralPro.
+
+    Please complete your subscription setup to unlock all business features.
+
+    Visit your dashboard: https://thereferralpro.com
+
+    Regards,
+    ReferralPro Team
+    """
+
+    msg = EmailMultiAlternatives(subject, text_content, from_email, [email])
+    msg.attach_alternative(html_content, "text/html")
+    msg.send()
+
+    print(f"Company signup email sent to {email}")
+
+
+
+def send_payment_success_email(email: str, name: str, plan_name: str, amount: float, currency: str, expiry_date, receipt_url: str):
+    subject = "Your Subscription Payment was Successful"
+    from_email = settings.DEFAULT_FROM_EMAIL
+
+    html_content = render_to_string('payment_success.html', {
+        'name': name,
+        'plan_name': plan_name,
+        'amount': amount,
+        'currency': currency,
+        'expiry_date': expiry_date,
+        'receipt_url': receipt_url,
+    })
+
+    text_content = f"""
+    Hi {name},
+
+    Your payment for {plan_name} was successful.  
+    Amount: {amount} {currency}  
+    Subscription valid until: {expiry_date}  
+
+    View receipt: {receipt_url}
+
+    Thank you for choosing ReferralPro!
+    """
+
+    msg = EmailMultiAlternatives(subject, text_content, from_email, [email])
+    msg.attach_alternative(html_content, "text/html")
+    msg.send()
+
+    print(f"Payment success email sent to {email}")
+
+
+
+
+def send_payment_failed_email(email: str, name: str, reason: str = None):
+    subject = "Your Payment Could Not Be Processed"
+    from_email = settings.DEFAULT_FROM_EMAIL
+
+    html_content = render_to_string('payment_failed.html', {
+        'name': name,
+        'reason': reason or "Unknown error",
+        'support_url': 'https://thereferralpro.com/',
+    })
+
+    text_content = f"""
+    Hi {name},
+
+    Unfortunately, your payment could not be processed.  
+    Reason: {reason or "Unknown error"}  
+
+    Please update your card details and try again.  
+    For assistance, visit: https://thereferralpro.com
+
+    Regards,
+    ReferralPro Team
+    """
+
+    msg = EmailMultiAlternatives(subject, text_content, from_email, [email])
+    msg.attach_alternative(html_content, "text/html")
+    msg.send()
+
+    print(f"Payment failed email sent to {email}")
+
+
+
+
+
+
+
+
+
+
+
 
 
 
