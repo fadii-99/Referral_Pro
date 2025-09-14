@@ -13,13 +13,14 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework_simplejwt.tokens import RefreshToken
 
 # models
-from .models import User, FavoriteCompany
+from .models import User, FavoriteCompany, ReferralUsage, BusinessInfo
 from .models import Subscription, Transaction
 
 # utils
 from utils.otp_utils import generate_otp, verify_otp
 from utils.twilio_service import TwilioService
 from utils.email_service import send_otp, send_invitation_email, send_company_signup_email, send_payment_failed_email, send_payment_success_email, send_solo_signup_success_email
+from utils.stripe_payment import stripe_payment
 
 # google auth
 from google.oauth2 import id_token
@@ -27,7 +28,6 @@ from google.auth.transport import requests as google_requests
 
 # other
 import requests
-import datetime
 import secrets
 import string
 import jwt
@@ -56,9 +56,7 @@ class SignupView(APIView):
 
     """Email/Password signup for Solo & Business users"""
     def post(self, request):
-        import json
-        from utils.stripe_payment import stripe_payment
-        from .models import BusinessInfo
+        
 
         # Handle both flat and nested payloads
         payload = request.data.get('payload')
@@ -249,6 +247,13 @@ class SignupView(APIView):
             )
             tokens = get_tokens_for_user(user)
 
+
+            if request.data.get("referral_code"):
+                RU = ReferralUsage.objects.create(
+                    referral_code=request.data.get("referral_code"),
+                    used_by=user
+                )
+
             return Response({
                 "message": "Solo user registered successfully",
                 "user": {"email": user.email, "name": user.full_name, "role": user.role},
@@ -279,19 +284,34 @@ class EmailPasswordLoginView(APIView):
         user = authenticate(request, email=email, password=password)
         if not user:
             return Response({"error": "Invalid credentials"}, status=401)
+        if role is "rep":
+            role = "employee"
 
-        if role != user.role:
-            return Response({"error": "Invalid credentials"}, status=401)
+        # if role != user.role:
+        #     return Response({"error": "Invalid credentials"}, status=401)
         
         tokens = get_tokens_for_user(user)
         user.is_active = True
         user.save()
 
 
-        response = Response({
-            "user": {"email": user.email, "name": user.full_name, "role": user.role, "is_passwordSet": user.is_passwordSet, "is_paid": user.is_paid},
-             "tokens": tokens
-        }, status=200)
+        if user.role == "company":
+            print("user.is_paid", user.is_paid)
+            response = Response({
+                "user": {"email": user.email, "name": user.full_name, "role": user.role, "is_paid": user.is_paid},
+                "tokens": tokens
+            }, status=200)
+        elif user.role == "employee":
+            print("user.is_passwordSet", user.is_passwordSet)
+            response = Response({
+                "user": {"email": user.email, "name": user.full_name, "role": user.role,  "is_passwordSet": user.is_passwordSet,},
+                "tokens": tokens
+            }, status=200)
+        else:
+            response = Response({
+                "user": {"email": user.email, "name": user.full_name, "role": user.role },
+                "tokens": tokens
+            }, status=200)
 
         
         # response.set_cookie(
@@ -403,6 +423,8 @@ class SendOTPView(APIView):
         email = request.data.get('email')
         phone = request.data.get('phone')
 
+        print(request.data)
+
         if not email and not phone:
             return Response({"error": "Either email or phone is required"}, status=400)
 
@@ -410,6 +432,7 @@ class SendOTPView(APIView):
         try:
             if email:
                 user = User.objects.get(email=email)
+                print("user", user.email)
             else:
                 user = User.objects.get(phone=phone)
         except User.DoesNotExist:
@@ -463,7 +486,7 @@ class VerifyOTPView(APIView):
 
         # Generate a temporary token for password reset
         temp_token = RefreshToken.for_user(user)
-        temp_token.set_exp(lifetime=datetime.timedelta(minutes=10))  # Token expires in 10 minutes
+        temp_token.set_exp(lifetime=timedelta(minutes=10))  # Token expires in 10 minutes
 
 
         return Response({
@@ -689,12 +712,13 @@ class TestEmployeeManagementView(APIView):
 class SendResetPasswordView(APIView):
     permission_classes = [IsAuthenticated]
     def get(self, request):
-        email = request.GET.get("id")
-        if not email:
-            return Response({"error": "Email is required"}, status=status.HTTP_400_BAD_REQUEST)
+        print(request.GET.get("id"))
+        id = request.GET.get("id")
+        if not id:
+            return Response({"error": "data is required"}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
-            user = User.objects.get(email=email, role="employee", parent_company=request.user)
+            user = User.objects.get(id=id)
         except User.DoesNotExist:
             return Response({"error": "Employee not found"}, status=status.HTTP_404_NOT_FOUND)
 
@@ -704,7 +728,7 @@ class SendResetPasswordView(APIView):
         user.save()
 
         try:
-            send_invitation_email(email, user.full_name, new_password)
+            send_invitation_email(user.email, user.full_name, new_password)
         except Exception as e:
             return Response({"error": f"Failed to send email: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 

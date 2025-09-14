@@ -510,17 +510,36 @@ class ListAssignedReferralView(APIView):
 
 
 
-
- 
 class ListRepReferralView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
         print(request.user)
-        referral = ReferralAssignment.objects.get(assigned_to_id=request.user.id)
-        referrals = Referral.objects.filter(id=referral.referral_id).select_related(
-            'referred_to', 'company', 'company__business_info'
-        )
+        
+        # Handle case where no assignments exist for the user
+        try:
+            assignments = ReferralAssignment.objects.filter(assigned_to=request.user)
+            if not assignments.exists():
+                return Response(
+                    {
+                        "message": "No referrals assigned to you",
+                        "referrals": [],
+                    },
+                    status=status.HTTP_200_OK,
+                )
+            
+            # Get all referral IDs for this user's assignments
+            referral_ids = assignments.values_list('referral_id', flat=True)
+            referrals = Referral.objects.filter(id__in=referral_ids).select_related(
+                'referred_to', 'company', 'company__business_info'
+            )
+            
+        except Exception as e:
+            return Response(
+                {"error": f"Error fetching referrals: {str(e)}"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+        
         referral_list = []
         for referral in referrals:  
             # Get company information
@@ -528,6 +547,7 @@ class ListRepReferralView(APIView):
             company_type = ""
             company_image = None
             industry = ""
+            business_info = None
             
             try:
                 if hasattr(referral.company, 'business_info'):
@@ -547,9 +567,12 @@ class ListRepReferralView(APIView):
                 # Handle cases where company relationships might not exist
                 company_name = "Unknown Company"
                 company_type = "Unknown"
+            
             display_name = company_name
-            if not display_name:
+            if not display_name and business_info:
                 display_name = business_info.user.full_name 
+            elif not display_name:
+                display_name = "Unknown Company"
             
             referral_list.append({
                 "id": referral.id,
@@ -579,9 +602,6 @@ class ListRepReferralView(APIView):
             },
             status=status.HTTP_200_OK,
         )
-    
-
-
 
 
 class SendAcceptView(APIView):

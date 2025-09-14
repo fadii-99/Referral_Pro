@@ -155,8 +155,6 @@ def send_company_signup_email(email: str, name: str):
 
     Your company account has been successfully created on ReferralPro.
 
-    Please complete your subscription setup to unlock all business features.
-
     Visit your dashboard: https://thereferralpro.com
 
     Regards,

@@ -2,6 +2,8 @@
 from django.contrib.auth.models import AbstractBaseUser, PermissionsMixin, BaseUserManager
 from django.db import models
 from django.core.files.storage import FileSystemStorage
+import string
+import random
 
 # Import the custom storage
 from utils.storage_backends import MediaStorage
@@ -53,6 +55,7 @@ class User(AbstractBaseUser, PermissionsMixin):
     # CHANGED: Update image field with custom storage and change upload_to path temporarily
     image = models.ImageField(upload_to="user_profiles/", storage=media_storage, null=True, blank=True)
     role = models.CharField(max_length=20, choices=ROLE_CHOICES, default="solo")
+    referral_code = models.CharField(max_length=20, null=True, blank=True, editable=False)
 
     parent_company = models.ForeignKey(
         "self",
@@ -81,6 +84,30 @@ class User(AbstractBaseUser, PermissionsMixin):
         if self.image:
             return self.image.url
         return None
+
+    def generate_referral_code(self):
+        """Generate a unique referral code for the user"""
+        while True:
+            # Generate 8-character code with uppercase letters and numbers
+            code = ''.join(random.choices(string.ascii_uppercase + string.digits, k=8))
+            
+            # Check if this code already exists
+            if not User.objects.filter(referral_code=code).exists():
+                self.referral_code = code
+                self.save(update_fields=['referral_code'])
+                return code
+
+    def save(self, *args, **kwargs):
+        """Override save to auto-generate referral code if not exists"""
+        if not self.referral_code:
+            # Don't call generate_referral_code here to avoid infinite recursion
+            # Generate code without saving
+            while True:
+                code = ''.join(random.choices(string.ascii_uppercase + string.digits, k=8))
+                if not User.objects.filter(referral_code=code).exists():
+                    self.referral_code = code
+                    break
+        super().save(*args, **kwargs)
 
 
 # BusinessInfo model
@@ -307,6 +334,26 @@ class FavoriteCompany(models.Model):
     def __str__(self):
         company_name = getattr(self.company.business_info, 'company_name', self.company.email) if hasattr(self.company, 'business_info') else self.company.email
         return f"{self.user.email} -> {company_name}"
+
+
+
+
+
+class ReferralUsage(models.Model):
+    referral_code = models.CharField(max_length=20, null=True, blank=True)
+    used_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name="used_referrals")
+    used_at = models.DateTimeField(auto_now_add=True)
+    source = models.CharField(max_length=100, blank=True, null=True, help_text="Where the referral code was used (e.g., signup, purchase)")
+    notes = models.TextField(blank=True, null=True, help_text="Optional notes about this referral usage")
+    
+    
+
+
+
+
+
+
+
 
 
 

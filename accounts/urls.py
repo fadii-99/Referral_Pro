@@ -35,7 +35,7 @@ urlpatterns = [
     path('employees/', EmployeeManagementView.as_view(), name='send_invite'),
     path('employees_post/', TestEmployeeManagementView.as_view(), name='send_invite'),
     path('set_employee_password/', SetEmployeePasswordView.as_view(), name='set-employee-password'),
-    path('employee_reset_password/<int:id>/', SendResetPasswordView.as_view(), name='send_reset_password'),
+    path('employee_reset_password/', SendResetPasswordView.as_view(), name='send_reset_password'),
 
     path('favourite/', FavoriteCompanyView.as_view(), name='send_invite'),
     # Delete user by email
