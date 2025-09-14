@@ -187,7 +187,6 @@ class SignupView(APIView):
                     stripe_charge_id=payment_details.get("charge_id"),
                     stripe_invoice_id=payment_details.get("invoice_id"),
                     stripe_customer_id=payment_details.get("customer_id"),
-                    description=f"Subscription to {plan_name} - {subscription_type}",
                     receipt_email=user.email,
                     receipt_url=payment_details.get("receipt_url"),
                     stripe_created_at=payment_details.get("created_at")
