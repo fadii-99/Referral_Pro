@@ -755,10 +755,9 @@ class UserInfoView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
-        print("\n\n\nheader", request.headers, "\n\n\n")
         user = User.objects.get(id=request.user.id)
         # image_url = user.get_image_url()
-
+        image_url = None
         if user.image and hasattr(user.image, 'url'):
             try:
                 # Check if it's a URL (from social login) or a file
@@ -771,7 +770,6 @@ class UserInfoView(APIView):
             except (ValueError, FileNotFoundError):
                 # Handle cases where file doesn't exist or invalid URL
                 image_url = None
-        print("image_url", image_url)
 
         return Response({
             "user": {
