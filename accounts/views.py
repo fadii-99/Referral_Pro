@@ -272,7 +272,7 @@ class EmailPasswordLoginView(APIView):
         email = request.data.get("email")
         password = request.data.get("password")
         role = request.data.get("role")
-        typee = request.data.get("typee")
+        typee = request.data.get("type")
 
 
 

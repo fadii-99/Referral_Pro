@@ -33,7 +33,7 @@ class Referral(models.Model):
         related_name="referrals"
     )
 
-    service_type = models.CharField(max_length=100, blank=True, null=True)
+    service_type = models.TextField(blank=True, null=True)
     urgency = models.CharField(max_length=50, blank=True, null=True)
     notes = models.TextField(blank=True, null=True)
     privacy_opted = models.BooleanField(default=False)

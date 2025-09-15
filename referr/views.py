@@ -375,7 +375,7 @@ class UpdateReferralPrivacyView(APIView):
 
         try:
             # Get the referral and ensure it belongs to the authenticated user
-            referral = Referral.objects.get(
+            referral = Referral.objects.filter(
                 id=referral_id
             ).filter(
                 models.Q(referred_by=request.user) | models.Q(referred_to=request.user)
