@@ -4,13 +4,16 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from rest_framework import status
 
+# Django
+from django.db import models
+
 # models
 from accounts.models import BusinessInfo
 from .models import Referral, ReferralAssignment
 from accounts.models import User, BusinessInfo, FavoriteCompany
 
 # utils
-from utils.email_service import send_app_download_email
+from utils.email_service import send_app_download_email, send_referral_email
 from utils.twilio_service import TwilioService
 
 
@@ -21,7 +24,7 @@ class ListCompaniesView(APIView):
 
     def get(self, request):
         """List all companies with favorite status for current user"""
-        companies = User.objects.filter(role='company').select_related('business_info')
+        companies = User.objects.filter(role='company').exclude(id=request.user.id).select_related('business_info')
         
         # Get user's favorite company IDs
         favorite_company_ids = set(
@@ -63,6 +66,63 @@ class ListCompaniesView(APIView):
         }, status=status.HTTP_200_OK)
 
 
+class FavoriteCompanyView(APIView):
+    permission_classes = [IsAuthenticated]
+
+
+    def post(self, request):
+        """Add a company to favorites"""
+        company_id = request.data.get('company_id')
+        
+        if not company_id:
+            return Response({"error": "Company ID is required"}, status=status.HTTP_400_BAD_REQUEST)
+        
+        try:
+            company = User.objects.get(id=company_id, role='company')
+        except User.DoesNotExist:
+            return Response({"error": "Company not found"}, status=status.HTTP_404_NOT_FOUND)
+        
+
+
+        # Don't allow users to favorite themselves
+        if request.user == company:
+            return Response({"error": "You cannot add yourself to favorites"}, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Check if already favorited
+        favorite_exists = FavoriteCompany.objects.filter(user=request.user, company=company)
+        if favorite_exists.exists():
+            favorite_exists.delete()
+            return Response({"message": "Company removed from favorites"}, status=status.HTTP_200_OK)
+        
+        
+        # Create favorite
+        favorite = FavoriteCompany.objects.create(
+            user=request.user,
+            company=company,
+        )
+        
+        
+        return Response({
+            "message": "Company added to favorites successfully",
+        }, status=status.HTTP_201_CREATED)
+
+
+    def delete(self, request):
+        """Remove a company from favorites"""
+        company_id = request.data.get('company_id')
+        
+        if not company_id:
+            return Response({"error": "Company ID is required"}, status=status.HTTP_400_BAD_REQUEST)
+        
+        try:
+            favorite = FavoriteCompany.objects.get(user=request.user, company_id=company_id)
+            favorite.delete()
+            return Response({"message": "Company removed from favorites successfully"}, status=status.HTTP_200_OK)
+        except FavoriteCompany.DoesNotExist:
+            return Response({"error": "Favorite not found"}, status=status.HTTP_404_NOT_FOUND)
+
+
+
 
  
 
@@ -88,11 +148,18 @@ class SendReferralView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        if request.user.email == referred_to_email:
+            return Response(
+                {"error": "You cannot refer yourself"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         try:
             # company = BusinessInfo.objects.get(id=company_id)
             COMPANY = User.objects.get(id=company_id)
         except BusinessInfo.DoesNotExist:
             return Response({"error": "Company not found"}, status=status.HTTP_404_NOT_FOUND)
+        
 
         # If referred_to user exists, use it. Otherwise, create a placeholder.
         referred_to_user, _ = User.objects.get_or_create(
@@ -110,6 +177,16 @@ class SendReferralView(APIView):
             privacy_opted=privacy,
             permission_consent=permission_consent,
         )
+
+        send_referral_email(
+            referred_to_email=referred_to_email,
+            referred_to_name=referred_to_name,
+            company_name=COMPANY.full_name,  
+            referred_by_name=request.user.full_name,
+            reason=reason,
+            request_description=request_description,
+        )
+
 
         return Response(
             {
@@ -298,7 +375,14 @@ class UpdateReferralPrivacyView(APIView):
 
         try:
             # Get the referral and ensure it belongs to the authenticated user
-            referral = Referral.objects.get(id=referral_id, referred_by=request.user)
+            referral = Referral.objects.get(
+                id=referral_id
+            ).filter(
+                models.Q(referred_by=request.user) | models.Q(referred_to=request.user)
+            ).first()
+            
+            if not referral:
+                raise Referral.DoesNotExist
         except Referral.DoesNotExist:
             return Response(
                 {"error": "Referral not found or you don't have permission to update it"},

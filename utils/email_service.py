@@ -30,6 +30,53 @@ def send_otp(email: str, otp_code: str, purpose: str, expires_in: int):
     print("OTP email sent.")
 
 
+def send_referral_email(
+    referred_to_email: str,
+    referred_to_name: str,
+    company_name: str,
+    referred_by_name: str,
+    reason: str = None,
+    request_description: str = None,
+):
+    """
+    Send an email notification when a referral is created.
+    """
+
+    subject = f"You've been referred to {company_name} via ReferralPro"
+    from_email = settings.DEFAULT_FROM_EMAIL
+
+    # Render HTML template (create referral_email.html in templates folder)
+    html_content = render_to_string("referral_email.html", {
+        "referred_to_name": referred_to_name,
+        "company_name": company_name,
+        "referred_by_name": referred_by_name,
+        "reason": reason,
+        "request_description": request_description,
+        "app_url": "https://thereferralpro.com/login",
+    })
+
+    # Plain text fallback
+    text_content = f"""
+    Hi {referred_to_name},
+
+    {referred_by_name} has referred you to {company_name} via ReferralPro.
+
+    Reason: {reason or 'No reason provided'}  
+    Notes: {request_description or 'No additional notes'}  
+
+    Log in to view details: https://thereferralpro.com/login
+
+    Regards,
+    ReferralPro Team
+    """
+
+    msg = EmailMultiAlternatives(subject, text_content, from_email, [referred_to_email])
+    msg.attach_alternative(html_content, "text/html")
+    msg.send()
+
+    print(f"Referral email sent to {referred_to_email}")
+
+
 
 
 def send_invitation_email(email: str, name: str, password: str):

@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>New Referral Notification</title>
+</head>
+<body style="margin:0; padding:0; background-color:#f7f8fa; font-family:Arial, sans-serif;">
+  <div style="max-width:600px; margin:30px auto; background:#ffffff; border-radius:8px; padding:30px; border:1px solid #e5e7eb;">
+    
+    <!-- Header -->
+    <h2 style="color:#02025c; margin-bottom:15px; font-size:22px; font-weight:bold;">
+      Hi {{ referred_to_name }},
+    </h2>
+
+    <!-- Intro -->
+    <p style="color:#333333; line-height:1.6; margin:0 0 15px 0;">
+      <strong>{{ referred_by_name }}</strong> has referred you to 
+      <strong>{{ company_name }}</strong> via <span style="color:#02025c; font-weight:bold;">ReferralPro</span>.
+    </p>
+
+    <!-- Reason -->
+    {% if reason %}
+    <div style="background:#f1f5f9; padding:15px; border-radius:6px; margin:20px 0; font-size:14px;">
+      <p style="margin:0;"><strong>Reason:</strong> {{ reason }}</p>
+    </div>
+    {% endif %}
+
+    <!-- Notes -->
+    {% if request_description %}
+    <div style="background:#f9fafb; padding:15px; border-radius:6px; margin:20px 0; font-size:14px;">
+      <p style="margin:0;"><strong>Notes:</strong> {{ request_description }}</p>
+    </div>
+    {% endif %}
+
+    <!-- Button -->
+    <p style="margin:0 0 30px 0;">
+      <a href="{{ app_url }}" 
+         style="display:inline-block; padding:12px 20px; background-color:#02025c; color:#ffffff; text-decoration:none; border-radius:6px; font-weight:bold;">
+         View Referral
+      </a>
+    </p>
+
+    <!-- Footer -->
+    <div style="margin-top:30px; font-size:12px; color:#6b7280;">
+      <p style="margin:0;">Best regards,<br>ReferralPro Team</p>
+    </div>
+
+  </div>
+</body>
+</html>

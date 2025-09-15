@@ -274,6 +274,8 @@ class EmailPasswordLoginView(APIView):
         role = request.data.get("role")
         typee = request.data.get("typee")
 
+
+
         if not email or not password:
             return Response({"error": "Email and password required"}, status=400)
         
@@ -281,14 +283,23 @@ class EmailPasswordLoginView(APIView):
             role = "company"
         
 
-        user = authenticate(request, email=email, password=password)
-        if not user:
+        try:
+            user = User.objects.get(email=email)
+            if user.check_password(password):
+                # Authentication successful, set user as active
+                user.is_active = True
+                user.save()
+            else:
+                return Response({"error": "Invalid credentials"}, status=401)
+        except User.DoesNotExist:
             return Response({"error": "Invalid credentials"}, status=401)
-        if role is "rep":
+        
+        if role == "rep":
             role = "employee"
 
-        # if role != user.role:
-        #     return Response({"error": "Invalid credentials"}, status=401)
+
+        if role != user.role:
+            return Response({"error": "Invalid credentials"}, status=401)
         
         tokens = get_tokens_for_user(user)
         user.is_active = True
@@ -296,13 +307,11 @@ class EmailPasswordLoginView(APIView):
 
 
         if user.role == "company":
-            print("user.is_paid", user.is_paid)
             response = Response({
                 "user": {"email": user.email, "name": user.full_name, "role": user.role, "is_paid": user.is_paid},
                 "tokens": tokens
             }, status=200)
         elif user.role == "employee":
-            print("user.is_passwordSet", user.is_passwordSet)
             response = Response({
                 "user": {"email": user.email, "name": user.full_name, "role": user.role,  "is_passwordSet": user.is_passwordSet,},
                 "tokens": tokens
@@ -749,7 +758,19 @@ class UserInfoView(APIView):
         print("\n\n\nheader", request.headers, "\n\n\n")
         user = User.objects.get(id=request.user.id)
         # image_url = user.get_image_url()
-        image_url = f"{settings.MEDIA_URL}{user.image}" if user.image else None
+
+        if user.image and hasattr(user.image, 'url'):
+            try:
+                # Check if it's a URL (from social login) or a file
+                if str(user.image).startswith(('http://', 'https://')):
+                    # It's a URL from social login
+                    image_url = str(user.image)
+                else:
+                    # It's a file stored in storage
+                    image_url = f"{settings.MEDIA_URL}{user.image}" if user.image else None
+            except (ValueError, FileNotFoundError):
+                # Handle cases where file doesn't exist or invalid URL
+                image_url = None
         print("image_url", image_url)
 
         return Response({
@@ -906,13 +927,13 @@ class DeleteUserView(APIView):
 class LogoutView(APIView):
     permission_classes = [IsAuthenticated]
 
-    def post(self, request):
-        refresh_token = request.data.get('refresh')
-        if not refresh_token:
-            return Response({"error": "Refresh token required."}, status=400)
+    def delete(self, request):
+        # refresh_token = request.data.get('refresh')
+        # if not refresh_token:
+        #     return Response({"error": "Refresh token required."}, status=400)
         try:
-            token = RefreshToken(refresh_token)
-            token.blacklist()
+            # token = RefreshToken(refresh_token)
+            # token.blacklist()
             # Deactivate user
             user = request.user
             user.is_active = False
@@ -920,63 +941,6 @@ class LogoutView(APIView):
             return Response({"message": "Logout successful."}, status=200)
         except TokenError:
             return Response({"error": "Invalid or expired token."}, status=400)
-
-
-class FavoriteCompanyView(APIView):
-    permission_classes = [IsAuthenticated]
-
-
-    def post(self, request):
-        """Add a company to favorites"""
-        company_id = request.data.get('company_id')
-        
-        if not company_id:
-            return Response({"error": "Company ID is required"}, status=status.HTTP_400_BAD_REQUEST)
-        
-        try:
-            company = User.objects.get(id=company_id, role='company')
-        except User.DoesNotExist:
-            return Response({"error": "Company not found"}, status=status.HTTP_404_NOT_FOUND)
-        
-
-
-        # Don't allow users to favorite themselves
-        if request.user == company:
-            return Response({"error": "You cannot add yourself to favorites"}, status=status.HTTP_400_BAD_REQUEST)
-        
-        # Check if already favorited
-        favorite_exists = FavoriteCompany.objects.filter(user=request.user, company=company)
-        if favorite_exists.exists():
-            favorite_exists.delete()
-            return Response({"message": "Company removed from favorites"}, status=status.HTTP_200_OK)
-        
-        
-        # Create favorite
-        favorite = FavoriteCompany.objects.create(
-            user=request.user,
-            company=company,
-        )
-        
-        
-        return Response({
-            "message": "Company added to favorites successfully",
-        }, status=status.HTTP_201_CREATED)
-
-
-    def delete(self, request):
-        """Remove a company from favorites"""
-        company_id = request.data.get('company_id')
-        
-        if not company_id:
-            return Response({"error": "Company ID is required"}, status=status.HTTP_400_BAD_REQUEST)
-        
-        try:
-            favorite = FavoriteCompany.objects.get(user=request.user, company_id=company_id)
-            favorite.delete()
-            return Response({"message": "Company removed from favorites successfully"}, status=status.HTTP_200_OK)
-        except FavoriteCompany.DoesNotExist:
-            return Response({"error": "Favorite not found"}, status=status.HTTP_404_NOT_FOUND)
-
 
 
 
