@@ -9,9 +9,9 @@ const data = Array.from({ length: 8 }, (_, i) => ({
 
 const Notifications: React.FC = () => {
   return (
-    <div className="p-6">
+    <div className="sm:p-6 p-3">
       {/* Header bar (title only – no search, no tabs) */}
-        <h2 className="text-2xl font-semibold text-primary-blue pb-4">Notifications</h2>
+        <h2 className="md:text-2xl text-xl font-semibold  text-primary-blue sm:pb-4 pb-0">Notifications</h2>
 
       {/* Card with list */}
       <div className="mt-4 bg-white rounded-2xl shadow-sm border border-black/5 p-4 sm:p-5">
@@ -28,9 +28,9 @@ const Notifications: React.FC = () => {
                 </svg>
               </span>
               <div className="flex-1">
-                <p className="text-[13px] text-[#0b0d3b] leading-snug">{n.title}</p>
+                <p className="md:text-sm text-xs text-primary-blue leading-snug">{n.title}</p>
               </div>
-              <div className="text-[11px] text-gray-400 shrink-0">{n.time}</div>
+              <div className="sm:text-xs text-[10px] text-gray-400 shrink-0">{n.time}</div>
             </li>
           ))}
         </ul>

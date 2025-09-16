@@ -45,6 +45,9 @@ const Login: React.FC = () => {
     const fd = new FormData();
     fd.append("email", form.email.trim());
     fd.append("password", form.password);
+    fd.append("type", "web");
+
+    
 
     try {
       const res = await fetch(`${serverUrl}/auth/login/`, {
@@ -67,6 +70,7 @@ const Login: React.FC = () => {
       } catch {}
       // console.log("[login] json (if parsable):", json);
       // --- end logging ---
+
 
       if (!res.ok) {
         const msg =

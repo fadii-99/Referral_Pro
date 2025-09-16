@@ -2,21 +2,24 @@ import React, {
   createContext,
   useCallback,
   useContext,
-  useEffect,
   useMemo,
   useState,
+  useEffect,
 } from "react";
+import { toast } from "react-toastify";
+
 
 export type TeamMember = {
   id: string;
   name: string;
   email: string;
   avatar: string;
-  role: string;       // 🔥 ab string hai
-  status: string;     // 🔥 ab string hai
+  role: string;
+  status: string;
   lastActive: string;
   phone?: string;
 };
+
 
 type Ctx = {
   loading: boolean;
@@ -25,8 +28,8 @@ type Ctx = {
   loadTeam: () => Promise<void>;
 };
 
-
 const TeamMembersContext = createContext<Ctx | null>(null);
+
 export const useTeamMembersContext = () => {
   const ctx = useContext(TeamMembersContext);
   if (!ctx)
@@ -45,52 +48,54 @@ export const TeamMembersProvider: React.FC<{ children: React.ReactNode }> = ({
   const [error, setError] = useState<string | null>(null);
   const [membersFromApi, setMembersFromApi] = useState<TeamMember[]>([]);
 
+
+
   const loadTeam = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
       const token = localStorage.getItem("accessToken");
-
+      if (!token) return; 
       const res = await fetch(`${serverUrl}/auth/employees/`, {
         method: "GET",
         headers: {
           Accept: "application/json",
           Authorization: token ? `Bearer ${token}` : "",
-          //  "ngrok-skip-browser-warning": "true", 
         },
       });
 
-      
+
+  
       if (!res.ok) {
         const errTxt = await res.text();
-        console.error("[employee_list] error response:", errTxt);
-        setError(`Failed (${res.status})`);
+        const msg = `Failed (${res.status}) - ${errTxt || "Unknown error"}`;
+        toast.error(msg);
+        setError(msg);
         setMembersFromApi([]);
         return;
       }
 
       const data = await res.json();
-      console.log("[employee_list] full json:", data);
-
       const arr = Array.isArray(data?.employees) ? data.employees : [];
-      console.log("[employee_list] employees array:", arr);
 
       const mapped: TeamMember[] = arr.map((emp: any) => ({
         id: String(emp.id),
         name: emp.full_name || "Unknown",
         email: emp.email,
-        avatar: `https://i.pravatar.cc/96?u=${emp.email}`, // random avatar
-        role: emp.role || "Unknown",                       // 🔥 directly string
-        status: emp.is_active ? "Active" : "Inactive",     // 🔥 string
+        avatar: `https://i.pravatar.cc/96?u=${emp.email}`,
+        role: emp.role || "Unknown",
+        status: emp.is_active ? "Active" : "Inactive",
         lastActive: emp.last_login
           ? new Date(emp.last_login).toLocaleDateString()
           : "—",
         phone: emp.phone ?? "—",
       }));
 
+      
       setMembersFromApi(mapped);
     } catch (err) {
-      console.error("[employee_list] network error:", err);
+      // console.error("[employee_list] network error:", err);
+      toast.error("Network error. Please try again.");
       setError("Network error");
       setMembersFromApi([]);
     } finally {
@@ -98,6 +103,7 @@ export const TeamMembersProvider: React.FC<{ children: React.ReactNode }> = ({
     }
   }, []);
 
+  // first load
   useEffect(() => {
     void loadTeam();
   }, [loadTeam]);

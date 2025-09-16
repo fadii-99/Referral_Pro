@@ -1,6 +1,8 @@
 import React, { useState } from "react";
 import { FiX, FiUser, FiMail } from "react-icons/fi";
 import Button from "../Button";
+import { toast } from "react-toastify";
+import { useTeamMembersContext } from "../../context/TeamMembersProvider";
 
 const serverUrl = import.meta.env.VITE_SERVER_URL;
 
@@ -10,6 +12,7 @@ type Props = {
 };
 
 const AddTeamMemberModal: React.FC<Props> = ({ open, onClose }) => {
+  const { loadTeam } = useTeamMembersContext();
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [loading, setLoading] = useState(false);
@@ -17,10 +20,13 @@ const AddTeamMemberModal: React.FC<Props> = ({ open, onClose }) => {
   if (!open) return null;
 
   const handleInvite = async () => {
-    if (!name.trim() || !email.trim()) return;
+    if (!name.trim() || !email.trim()) {
+      toast.error("Name and Email are required!");
+      return;
+    }
     setLoading(true);
     try {
-      const token = localStorage.getItem("accessToken"); // ✅ get token from localStorage
+      const token = localStorage.getItem("accessToken");
 
       const fd = new FormData();
       fd.append("name", name.trim());
@@ -40,19 +46,22 @@ const AddTeamMemberModal: React.FC<Props> = ({ open, onClose }) => {
         data = raw ? JSON.parse(raw) : null;
       } catch {}
 
-      console.log("[send-invite] status:", res.status, res.statusText);
-      console.log("[send-invite] response:", data ?? raw);
-
       if (!res.ok) {
+        toast.error(data?.error || `Failed (${res.status})`);
         return;
       }
 
-      onClose();
+      // ✅ success
+      toast.success("Invite sent successfully!");
       setName("");
       setEmail("");
+      onClose();
+
+      // 🔥 reload fresh team list
+      await loadTeam();
     } catch (err) {
       console.error("[send-invite] error:", err);
-      alert("Error sending invite");
+      toast.error("Network error while sending invite.");
     } finally {
       setLoading(false);
     }
@@ -63,7 +72,9 @@ const AddTeamMemberModal: React.FC<Props> = ({ open, onClose }) => {
       <div className="w-full max-w-xl bg-white rounded-3xl shadow-xl relative">
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-6">
-          <h3 className="text-2xl font-semibold text-primary-blue">Add Member</h3>
+          <h3 className="text-2xl font-semibold text-primary-blue">
+            Add Member
+          </h3>
           <button
             onClick={onClose}
             aria-label="Close"
@@ -77,7 +88,9 @@ const AddTeamMemberModal: React.FC<Props> = ({ open, onClose }) => {
         <div className="px-6 pb-6 space-y-5">
           {/* Name */}
           <div>
-            <label className="block text-xs text-primary-blue font-medium mb-2">Name</label>
+            <label className="block text-xs text-primary-blue font-medium mb-2">
+              Name
+            </label>
             <div className="relative">
               <span className="absolute left-6 top-1/2 -translate-y-1/2 text-primary-purple">
                 <FiUser className="h-5 w-5" />
@@ -87,14 +100,16 @@ const AddTeamMemberModal: React.FC<Props> = ({ open, onClose }) => {
                 placeholder="John Smith"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                className="w-full pl-14 pr-4 py-5 rounded-full bg-white border border-gray-200 text-xs text-gray-800 placeholder-gray-400 outline-none focus:ring-2 focus:ring-primary-blue/20 focus:border-primary-blue/50"
+                className="w-full pl-14 pr-4 py-5 rounded-full bg-white border border-gray-200 text-xs text-gray-800 placeholder-gray-400 outline-none"
               />
             </div>
           </div>
 
           {/* Email */}
           <div>
-            <label className="block text-xs text-primary-blue font-medium mb-2">Email Address</label>
+            <label className="block text-xs text-primary-blue font-medium mb-2">
+              Email Address
+            </label>
             <div className="relative">
               <span className="absolute left-6 top-1/2 -translate-y-1/2 text-primary-purple">
                 <FiMail className="h-5 w-5" />
@@ -104,11 +119,12 @@ const AddTeamMemberModal: React.FC<Props> = ({ open, onClose }) => {
                 placeholder="email@example.com"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                className="w-full pl-14 pr-4 py-5 rounded-full bg-white border border-gray-200 text-xs text-gray-800 placeholder-gray-400 outline-none focus:ring-2 focus:ring-primary-blue/20 focus:border-primary-blue/50"
+                className="w-full pl-14 pr-4 py-5 rounded-full bg-white border border-gray-200 text-xs text-gray-800 placeholder-gray-400 outline-none"
               />
             </div>
           </div>
 
+          {/* Submit */}
           <div className="pt-2">
             <Button
               text={loading ? "Sending..." : "Send Invite"}

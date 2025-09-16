@@ -13,7 +13,7 @@ export type TeamMember = {
 };
 
 const RolePill: React.FC<{ role: string }> = ({ role }) => (
-  <span className="inline-flex items-center px-3 py-2 rounded-lg text-sm font-medium text-primary-purple bg-primary-purple/10">
+  <span className="inline-flex items-center px-3 py-2 rounded-lg md:text-sm text-xs font-medium text-primary-purple bg-primary-purple/10">
     {role}
   </span>
 );
@@ -27,7 +27,9 @@ const StatusPill: React.FC<{ status: string }> = ({ status }) => {
   const classes = map[status] || "text-gray-700 bg-gray-100";
 
   return (
-    <span className={`inline-flex items-center px-3 py-2 rounded-lg text-sm font-medium ${classes}`}>
+    <span
+      className={`inline-flex items-center px-3 py-2 rounded-lg md:text-sm text-xs font-medium ${classes}`}
+    >
       {status}
     </span>
   );
@@ -39,9 +41,11 @@ const TeamRow: React.FC<{
   onDelete?: (m: TeamMember) => void;
 }> = ({ member, onEdit, onDelete }) => {
   return (
-<div className="grid grid-cols-[0.6fr_2fr_1.8fr_1.2fr_1.2fr_1fr] items-center bg-white rounded-2xl px-6 py-3 border border-black/5 shadow-sm">
+    <div className="grid grid-cols-[0.6fr_2fr_1.8fr_1.2fr_1.2fr_1fr] min-w-[650px] items-center bg-white rounded-2xl md:px-6 px-3 py-3 border border-black/5 shadow-sm">
       {/* ID */}
-      <div className="font-medium text-gray-700 text-sm">{member.id}</div>
+      <div className="font-medium text-gray-700 md:text-sm text-xs">
+        {member.id}
+      </div>
 
       {/* Name + Avatar */}
       <div className="flex items-center gap-3">
@@ -50,11 +54,15 @@ const TeamRow: React.FC<{
           alt={`${member.name} avatar`}
           className="h-8 w-8 rounded-full object-cover"
         />
-        <span className="font-medium text-gray-700 text-sm">{member.name}</span>
+        <span className="font-medium text-gray-700 md:text-sm text-xs">
+          {member.name}
+        </span>
       </div>
 
       {/* Email */}
-      <div className="text-gray-600 text-sm">{member.email}</div>
+      <div className="text-gray-600 md:text-sm text-xs pr-2">
+        {member.email}
+      </div>
 
       {/* Role */}
       <div>

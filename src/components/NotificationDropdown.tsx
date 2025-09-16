@@ -73,11 +73,11 @@ const NotificationDropdown: React.FC = () => {
         >
           {/* Header */}
           <div className="flex items-center justify-between px-5 py-4 border-b border-gray-200">
-            <h4 className="text-lg font-semibold text-[#0b0d3b]">Notifications</h4>
+            <h4 className="sm:text-lg text-sm font-semibold text-gray-900">Notifications</h4>
             <button
               type="button"
               onClick={goAll}
-              className="text-primary-purple text-xs font-medium hover:underline hover:underline-offset-4"
+              className="text-primary-purple sm:text-xs text-[10px] font-medium hover:underline hover:underline-offset-4"
             >
               View All
             </button>
@@ -95,10 +95,10 @@ const NotificationDropdown: React.FC = () => {
                   </svg>
                 </span>
                 <div className="flex-1">
-                  <p className="text-[13px] text-[#0b0d3b] leading-snug">
+                  <p className="md:text-sm text-xs text-primary-blue leading-snug">
                     {n.title}
                   </p>
-                  <div className="text-[11px] text-gray-400 mt-2">{n.time}</div>
+                  <div className="sm:text-xs text-[10px] text-gray-400 mt-2">{n.time}</div>
                 </div>
               </li>
             ))}

@@ -23,74 +23,79 @@ const Forget: React.FC = () => {
     setForm((prev) => ({ ...prev, [name]: value }));
   };
 
+
   const resetHandler: React.MouseEventHandler<HTMLButtonElement> = async () => {
-    const email = form.email.trim();
-    if (!email) {
-      toast.error("Please enter your email");
-      return;
-    }
+  const email = form.email.trim();
+  if (!email) {
+    toast.error("Please enter your email");
+    return;
+  }
 
-    setLoading(true);
+  setLoading(true);
 
+  // persist for next screen
+  localStorage.setItem("Email", email);
+
+  try {
+    // FormData bana rahe ho (agar backend isi format me expect karta hai)
     const fd = new FormData();
     fd.append("email", email);
 
-    // persist for next screen
-    localStorage.setItem("Email", email);
+    const res = await fetch(`${serverUrl}/auth/send_otp/`, {
+      method: "POST",
+      body: fd,
+    });
 
-    try {
-      const url = new URL(`${serverUrl}/auth/send_otp/`);
+    const ct = res.headers.get("content-type") || "";
+    let data: any = null;
 
-      const res = await fetch(url.toString(), {
-        method: "POST",
-        body: fd,
-        cache: "no-store"
-      });
-
-      const ct = res.headers.get("content-type") || "";
-      let data: any = null;
-      if (ct.includes("application/json")) {
-        try {
-          data = await res.json();
-        } catch {
-          data = null;
-        }
-      } else {
-        try {
-          data = await res.text();
-        } catch {
-          data = null;
-        }
+    if (ct.includes("application/json")) {
+      try {
+        data = await res.json();
+      } catch {
+        data = null;
       }
-
-      if (!res.ok) {
-        console.groupCollapsed(`❌ send_otp failed ${res.status} ${res.statusText}`);
-        console.log(typeof data === "string" ? data : JSON.stringify(data, null, 2));
-        console.groupEnd();
-
-        const msg =
-          (data && (data.error || data.detail || data.message)) ||
-          (res.status === 404 ? "No account found with this email" : "Failed to send OTP");
-        toast.error(msg);
-        return;
+    } else {
+      try {
+        data = await res.text();
+      } catch {
+        data = null;
       }
+    }
 
-      console.groupCollapsed("✅ send_otp success");
+    if (!res.ok) {
+      console.groupCollapsed(`❌ send_otp failed ${res.status} ${res.statusText}`);
       console.log(typeof data === "string" ? data : JSON.stringify(data, null, 2));
       console.groupEnd();
 
-      toast.success(
-        typeof data === "string" ? "OTP sent" : data?.message || "OTP sent"
-      );
-
-      navigate("/PasswordVerification", { state: { email } });
-    } catch (err) {
-      console.error("Forgot password error:", err);
-      toast.error("Network error. Please try again.");
-    } finally {
-      setLoading(false);
+      const msg =
+        (data && (data.error || data.detail || data.message)) ||
+        (res.status === 404
+          ? "No account found with this email"
+          : "Failed to send OTP");
+      toast.error(msg);
+      return;
     }
-  };
+
+    console.groupCollapsed("✅ send_otp success");
+    console.log(typeof data === "string" ? data : JSON.stringify(data, null, 2));
+    console.groupEnd();
+
+    toast.success(
+      typeof data === "string" ? "OTP sent" : data?.message || "OTP sent"
+    );
+
+    navigate("/PasswordVerification", { state: { email } });
+  } catch (err) {
+    console.error("Forgot password error:", err);
+    toast.error("Network error. Please try again.");
+  } finally {
+    setLoading(false);
+  }
+};
+
+
+
 
   return (
     <div className="grid md:grid-cols-5 w-full min-h-screen">

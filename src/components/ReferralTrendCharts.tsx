@@ -10,7 +10,9 @@ import {
   Filler,
   Legend,
 } from "chart.js";
+import ChartDataLabels from "chartjs-plugin-datalabels";
 
+// Register basic chart components
 ChartJS.register(
   CategoryScale,
   LinearScale,
@@ -21,16 +23,19 @@ ChartJS.register(
   Legend
 );
 
-const ReferralTrendsChart: React.FC = () => {
-  // Colors (match your brand vibe)
-  const lineColor = "#00C4F4"; // bright cyan like screenshot
-  const topFill = "rgba(0, 196, 244, 0.45)";   // darker near the line
-  const bottomFill = "rgba(0, 196, 244, 0.06)"; // very light at bottom
+// ❌ make sure datalabels not auto-activated
+ChartJS.unregister(ChartDataLabels);
 
-  // gradient must be created with canvas context; use a callback bg color
+const ReferralTrendsChart: React.FC = () => {
+  // Brand colors
+  const lineColor = "#00C4F4";
+  const topFill = "rgba(0, 196, 244, 0.45)";
+  const bottomFill = "rgba(0, 196, 244, 0.06)";
+
+  // Gradient fill
   const gradientBg = (context: any) => {
     const { ctx, chartArea } = context.chart;
-    if (!chartArea) return topFill; // initial render fallback
+    if (!chartArea) return topFill;
     const gradient = ctx.createLinearGradient(
       0,
       chartArea.top,
@@ -79,6 +84,9 @@ const ReferralTrendsChart: React.FC = () => {
           label: (ctx: any) => `$${ctx.parsed.y}`,
         },
       },
+      datalabels: {
+        display: false, // 🚀 disables permanent numbers
+      },
     },
     elements: {
       point: { hitRadius: 16 },
@@ -93,11 +101,11 @@ const ReferralTrendsChart: React.FC = () => {
         grid: { display: false },
         border: {
           display: true,
-          color: "rgba(0, 196, 244, 0.35)", // light baseline like mock
+          color: "rgba(0, 196, 244, 0.35)",
           width: 2,
         },
         ticks: {
-          color: "#0b0d3b", // deep navy like your UI
+          color: "#0b0d3b",
           font: { weight: "700" as const },
         },
       },
@@ -105,13 +113,15 @@ const ReferralTrendsChart: React.FC = () => {
   };
 
   return (
-    <div className="bg-white p-6 rounded-xl shadow-sm">
-      <h3 className="text-xl font-semibold text-primary-blue mb-4">
+    <div className="bg-white md:p-6 p-4 rounded-xl shadow-sm">
+      <h3 className="sm:text-xl text-md font-semibold text-primary-blue md:mb-4 mb-2">
         Referral Trends
       </h3>
       <div className="mb-4">
-        <span className="font-bold text-4xl text-primary-blue">+15%</span>
-        <p className="text-sm text-primary-blue">
+        <span className="font-bold sm:text-4xl text-2xl text-primary-blue">
+          +15%
+        </span>
+        <p className="sm:text-sm text-[10px] text-primary-blue">
           This Week <span className="text-green-500">+15%</span>
         </p>
       </div>

@@ -1,47 +1,89 @@
-// src/components/EditProfileModal/index.tsx (or your path)
 import React, { useEffect, useRef, useState } from "react";
-import Button from "./../Button";
+import Button from "../Button";
 import { FiX, FiUser, FiPhone, FiMail, FiCamera } from "react-icons/fi";
-import type { ProfileData } from "./../../pages/Profile";
+import { useUserContext } from "../../context/UserProvider";
+import { toast, ToastContainer } from "react-toastify";
+import "react-toastify/dist/ReactToastify.css";
+
+const serverUrl = import.meta.env.VITE_SERVER_URL;
 
 type Props = {
   open: boolean;
-  profile: ProfileData;
   onClose: () => void;
-  onSave: (p: ProfileData) => void;
 };
 
-const EditProfileModal: React.FC<Props> = ({ open, profile, onClose, onSave }) => {
-  const [name, setName] = useState(profile.name);
-  const [email, setEmail] = useState(profile.email);
-  const [phone, setPhone] = useState(profile.phone);
-  const [avatar, setAvatar] = useState(profile.avatar);
+const EditProfileModal: React.FC<Props> = ({ open, onClose }) => {
+  const { user, loadUser } = useUserContext();
+  const [name, setName] = useState(user?.name || "");
+  const [phone, setPhone] = useState(user?.phone || "");
+  const [avatarPreview, setAvatarPreview] = useState(user?.avatar || "");
+  const [avatarFile, setAvatarFile] = useState<File | null>(null);
 
   const inputFileRef = useRef<HTMLInputElement | null>(null);
+  const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     if (!open) return;
-    setName(profile.name);
-    setEmail(profile.email);
-    setPhone(profile.phone);
-    setAvatar(profile.avatar);
-  }, [open, profile]);
+    setName(user?.name || "");
+    setPhone(user?.phone || "");
+    setAvatarPreview(user?.avatar || "");
+    setAvatarFile(null);
+  }, [open, user]);
 
   if (!open) return null;
 
   const onPickFile = () => inputFileRef.current?.click();
+
   const onFile = (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
     if (!f) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      if (typeof reader.result === "string") setAvatar(reader.result);
-    };
-    reader.readAsDataURL(f);
+    setAvatarFile(f);
+    setAvatarPreview(URL.createObjectURL(f));
   };
 
-  const handleSave = () => {
-    onSave({ name: name.trim(), email: email.trim(), phone: phone.trim(), avatar });
+  const handleSave = async () => {
+    if (!name.trim()) {
+      toast.error("Name is required!");
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const token = localStorage.getItem("accessToken");
+
+      const fd = new FormData();
+      fd.append("full_name", name.trim());
+      fd.append("phone", phone.trim());
+
+      if (avatarFile) {
+        fd.append("image", avatarFile);
+      }
+
+      const res = await fetch(`${serverUrl}/auth/update_user/`, {
+        method: "POST",
+        headers: {
+          Authorization: token ? `Bearer ${token}` : "",
+        },
+        body: fd,
+      });
+
+      const data = await res.json();
+      console.log("[update-user] response:", data);
+
+      if (!res.ok) {
+        toast.error(data?.error || `Failed (${res.status})`);
+        return;
+      }
+
+      toast.success("Profile updated successfully!");
+      await loadUser(); // ✅ Refresh context
+      onClose();
+    } catch (err) {
+      console.error("[update-user] error:", err);
+      toast.error("Network error while updating profile.");
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -49,7 +91,9 @@ const EditProfileModal: React.FC<Props> = ({ open, profile, onClose, onSave }) =
       <div className="w-full max-w-2xl bg-white rounded-3xl shadow-xl relative">
         {/* Header */}
         <div className="flex items-center justify-between px-6 pt-6">
-          <h3 className="text-2xl font-semibold text-primary-blue">Edit Profile</h3>
+          <h3 className="text-2xl font-semibold text-primary-blue">
+            Edit Profile
+          </h3>
           <button
             onClick={onClose}
             aria-label="Close"
@@ -59,22 +103,20 @@ const EditProfileModal: React.FC<Props> = ({ open, profile, onClose, onSave }) =
           </button>
         </div>
 
-        {/* Avatar + "Change Photo" */}
+        {/* Avatar */}
         <div className="px-6 mt-3 flex flex-col items-center">
           <img
-            src={avatar}
+            src={avatarPreview}
             alt="avatar"
             className="h-24 w-24 rounded-full object-cover ring-2 ring-white shadow"
           />
 
-          {/* Badge BELOW the image */}
           <button
             type="button"
             onClick={onPickFile}
-            className="mt-2 inline-flex items-center gap-1 text-[11px] px-3 py-2 mt-1 rounded-full 
-                       bg-secondary-blue text-white font-light shadow-[0_2px_10px_rgba(0,0,0,0.06)]"
+            className="mt-2 inline-flex items-center gap-1 text-[11px] px-3 py-2 rounded-full bg-secondary-blue text-white font-light shadow"
           >
-            <FiCamera className="text-white mr-1 " />
+            <FiCamera className="text-white mr-1" />
             Change Photo
           </button>
 
@@ -89,7 +131,7 @@ const EditProfileModal: React.FC<Props> = ({ open, profile, onClose, onSave }) =
 
         {/* Form */}
         <div className="px-6 pb-6 pt-4 space-y-5">
-          {/* Full Name */}
+          {/* Name */}
           <div>
             <label className="block text-xs text-primary-blue font-medium mb-2">
               Full Name<span className="text-rose-500">*</span>
@@ -100,10 +142,9 @@ const EditProfileModal: React.FC<Props> = ({ open, profile, onClose, onSave }) =
               </span>
               <input
                 type="text"
-                placeholder="Enter your full name"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                className="w-full pl-14 pr-4 py-5 rounded-full bg-white border border-gray-200 text-xs text-gray-800 placeholder-gray-400 outline-none focus:ring-2 focus:ring-primary-blue/20 focus:border-primary-blue/50"
+                className="w-full pl-14 pr-4 py-5 rounded-full bg-white border border-gray-200 text-xs text-gray-800 placeholder-gray-400 outline-none"
               />
             </div>
           </div>
@@ -119,15 +160,14 @@ const EditProfileModal: React.FC<Props> = ({ open, profile, onClose, onSave }) =
               </span>
               <input
                 type="tel"
-                placeholder="Enter your phone number"
                 value={phone}
                 onChange={(e) => setPhone(e.target.value)}
-                className="w-full pl-14 pr-4 py-5 rounded-full bg-white border border-gray-200 text-xs text-gray-800 placeholder-gray-400 outline-none focus:ring-2 focus:ring-primary-blue/20 focus:border-primary-blue/50"
+                className="w-full pl-14 pr-4 py-5 rounded-full bg-white border border-gray-200 text-xs text-gray-800 placeholder-gray-400 outline-none"
               />
             </div>
           </div>
 
-          {/* Email (LOCKED) */}
+          {/* Email (locked) */}
           <div>
             <label className="block text-xs text-primary-blue font-medium mb-2">
               Email Address
@@ -138,22 +178,29 @@ const EditProfileModal: React.FC<Props> = ({ open, profile, onClose, onSave }) =
               </span>
               <input
                 type="email"
-                value={email}
+                value={user?.email || ""}
                 readOnly
                 disabled
-                aria-readonly
-                className="w-full pl-14 pr-4 py-5 rounded-full bg-gray-50 border border-gray-200 
-                           text-xs text-gray-500 placeholder-gray-400 outline-none cursor-not-allowed"
+                className="w-full pl-14 pr-4 py-5 rounded-full bg-gray-50 border border-gray-200 text-xs text-gray-500 cursor-not-allowed"
               />
             </div>
           </div>
 
           {/* Save */}
           <div className="pt-2">
-            <Button text="Update" fullWidth py="py-5" mt="mt-0" onClick={handleSave} />
+            <Button
+              text={loading ? "Updating..." : "Update"}
+              fullWidth
+              py="py-5"
+              mt="mt-0"
+              onClick={handleSave}
+              disabled={loading}
+            />
           </div>
         </div>
       </div>
+
+      <ToastContainer position="top-right" autoClose={3000} hideProgressBar />
     </div>
   );
 };

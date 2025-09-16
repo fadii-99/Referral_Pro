@@ -14,18 +14,18 @@ const DashboardCard: React.FC<DashboardCardProps> = ({
   isNegative = false,
 }) => {
   return (
-    <div className="bg-primary-blue text-white rounded-2xl p-4 shadow-md relative">
-      <h4 className="text-sm">{title}</h4>
-      <p className="text-3xl font-bold mt-2">{value}</p>
+    <div className="bg-primary-blue text-white rounded-2xl sm:p-4 p-3 shadow-md relative">
+      <h4 className="sm:text-sm text-xs">{title}</h4>
+      <p className="sm:text-3xl text-2xl font-bold mt-2">{value}</p>
       <span
-        className={`text-sm ${
+        className={`sm:text-sm text-xs ${
           isNegative ? "text-red-400" : "text-green-400"
         }`}
       >
         {change}
       </span>
-      <div className="absolute top-5 right-5 w-[10px] h-[10px] bg-secondary-blue rounded-full">
-      </div>
+      {/* <div className="absolute sm:top-5 top-2 sm:right-5 right-2 sm:w-[10px] sm:h-[10px] bg-secondary-blue rounded-full">
+      </div> */}
     </div>
   );
 };

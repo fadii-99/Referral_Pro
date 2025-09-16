@@ -30,6 +30,7 @@ const CreatePassword: React.FC = () => {
     setForm((prev) => ({ ...prev, [name]: value }));
   };
 
+  
   const createPasswordHandler: React.MouseEventHandler<HTMLButtonElement> = async () => {
     if (loading) return;
 
@@ -85,6 +86,7 @@ const CreatePassword: React.FC = () => {
         typeof data === "string" ? "Password set successfully" : data?.message || "Password set successfully"
       );
 
+      
       // cleanup in-memory token then move on
       setTempToken("");
       navigate("/PasswordSuccess");

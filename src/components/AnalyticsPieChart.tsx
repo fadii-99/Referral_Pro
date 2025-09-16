@@ -91,42 +91,45 @@ const AnalyticsPieChart: React.FC<Props> = ({
     rotation: -0.1,  // tiny offset so a seam isn't dead-vertical (aesthetic)
   };
 
-  return (
-    <div className="bg-white rounded-xl shadow-sm border border-black/5 p-5">
-      <div className="mb-4">
-        <p className="text-sm text-slate-600">Earnings by Business</p>
-        <div className="text-2xl font-bold text-primary-blue leading-tight">+10%</div>
-        <p className="text-sm text-slate-600">
-          This Month <span className="text-green-500">+10%</span>
-        </p>
+    return (
+      <div className="bg-white rounded-xl shadow-sm border border-black/5 md:p-5 p-3 h-full flex flex-col"> 
+              <h3 className="sm:text-xl text-md font-semibold text-primary-blue md:mb-4 mb-2">
+                Earnings by Business
+              </h3>
+              <div className="mb-4">
+                <span className="font-bold sm:text-4xl text-2xl text-primary-blue">
+                  +10%
+                </span>
+                <p className="sm:text-sm text-[10px] text-primary-blue">
+                  This Month <span className="text-green-500">+10%</span>
+                </p>
+              </div>
+
+        {/* Legend */}
+        <div className="flex items-center justify-center gap-8 mb-4">
+          <div className="flex items-center gap-2">
+            <span className="inline-block h-3 w-3 rounded-full" style={{ backgroundColor: C_TEAL_LT }} />
+            <span className="text-slate-700 md:text-sm text-xs">Accepted</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="inline-block h-3 w-3 rounded-full" style={{ backgroundColor: C_TEAL_DARK }} />
+            <span className="text-slate-700 md:text-sm text-xs">Rejected</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="inline-block h-3 w-3 rounded-full" style={{ backgroundColor: C_ORANGE }} />
+            <span className="text-slate-700 md:text-sm text-xs">Pending</span>
+          </div>
+        </div>
+
+        {/* Pie chart grow full height */}
+        <div className="flex-1 flex items-center justify-center">
+          <div className="w-full h-full">
+            <Pie data={DATA} options={options} />
+          </div>
+        </div>
       </div>
+    );
 
-
-      <div className="flex items-center justify-center gap-8 mb-4 w-full">
-        <div className="flex items-center gap-2">
-          <span className="inline-block h-3 w-3 rounded-full" style={{ backgroundColor: C_TEAL_LT }} />
-          <span className="text-slate-700 text-sm">Accepted</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <span className="inline-block h-3 w-3 rounded-full" style={{ backgroundColor: C_TEAL_DARK }} />
-          <span className="text-slate-700 text-sm">Rejected</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <span className="inline-block h-3 w-3 rounded-full" style={{ backgroundColor: C_ORANGE }} />
-          <span className="text-slate-700 text-sm">Pending</span>
-        </div>
-      </div>
-     
-
-      {/* Pie chart */}
-    <div className="h-full w-full">
-  <Pie data={DATA} options={options} />
-</div>
-
-
-
-    </div>
-  );
 };
 
 export default AnalyticsPieChart;

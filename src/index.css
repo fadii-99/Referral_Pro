@@ -1,4 +1,6 @@
 @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@100;200;300;400;500;600;700;800;900&display=swap');
+@import 'simplebar-react/dist/simplebar.min.css';
+
 
 @tailwind base;
 @tailwind components;
@@ -15,4 +17,34 @@ input:-webkit-autofill {
   -webkit-box-shadow: 0 0 0px 1000px white inset !important;
   box-shadow: 0 0 0px 1000px white inset !important;
   -webkit-text-fill-color: #111 !important;
+}
+
+
+
+
+.simplebar-scrollbar::before {
+  background-color: #d1d5db !important; /* light grey */
+  border-radius: 9999px;
+  opacity: 0.4; /* default thoda faint */
+  transition: opacity 0.2s, background-color 0.2s;
+}
+
+.simplebar-scrollbar.simplebar-visible::before {
+  opacity: 0.7; /* hover par visible */
+  background-color: #9ca3af !important; /* thoda darker grey */
+}
+
+.simplebar-track.simplebar-vertical {
+  width: 8px !important; /* thin width */
+}
+
+
+
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: scale(0.95); }
+  to { opacity: 1; transform: scale(1); }
+}
+.animate-fadeIn {
+  animation: fadeIn 0.2s ease-out;
 }

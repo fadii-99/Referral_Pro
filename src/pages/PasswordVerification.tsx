@@ -7,7 +7,7 @@ import { ToastContainer, toast } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
 import { RegistrationContext } from "../context/RegistrationProvider";
 
-const RESEND_WINDOW = 85; // seconds
+const RESEND_WINDOW = 85; 
 const serverUrl = import.meta.env.VITE_SERVER_URL;
 
 const PasswordVerification: React.FC = () => {
@@ -25,9 +25,13 @@ const PasswordVerification: React.FC = () => {
   if (!ctx) throw new Error("Wrap your app with <RegistrationProvider />");
   const { setTempToken } = ctx;
 
+
+
   useEffect(() => {
     inputsRef.current[0]?.focus();
   }, []);
+
+
 
   // resend cooldown timer
   useEffect(() => {
@@ -118,8 +122,10 @@ const PasswordVerification: React.FC = () => {
     fd.append("email", localStorage.getItem("Email") || "");
 
     try {
-      const url = new URL(`${serverUrl}/auth/verify_otp/`);
-      const res = await fetch(url.toString(), { method: "POST", body: fd });
+      const res = await fetch(`${serverUrl}/auth/verify_otp/`, {
+        method: "POST",
+        body: fd,
+      });
 
       const ct = res.headers.get("content-type") || "";
       let data: any = null;
@@ -133,6 +139,7 @@ const PasswordVerification: React.FC = () => {
         } catch {}
       }
 
+      
       if (!res.ok) {
         console.groupCollapsed(`❌ verify_otp failed ${res.status} ${res.statusText}`);
         console.log(typeof data === "string" ? data : JSON.stringify(data, null, 2));
@@ -143,7 +150,7 @@ const PasswordVerification: React.FC = () => {
       }
 
       if (data && typeof data !== "string" && data.temp_token) {
-        setTempToken(data.temp_token); // context only (not persisted)
+        setTempToken(data.temp_token);
       }
 
       localStorage.removeItem("Email");
@@ -167,11 +174,13 @@ const PasswordVerification: React.FC = () => {
     setResending(true);
 
     try {
-      const url = new URL(`${serverUrl}/auth/send_otp/`);
       const fd = new FormData();
       fd.append("email", email);
 
-      const res = await fetch(url.toString(), { method: "POST", body: fd });
+      const res = await fetch(`${serverUrl}/auth/send_otp/`, {
+        method: "POST",
+        body: fd,
+      });
 
       const ct = res.headers.get("content-type") || "";
       let data: any = null;
@@ -184,7 +193,6 @@ const PasswordVerification: React.FC = () => {
           data = await res.text();
         } catch {}
       }
-
 
       if (!res.ok) {
         console.groupCollapsed(`❌ resend_otp failed ${res.status} ${res.statusText}`);
@@ -207,7 +215,6 @@ const PasswordVerification: React.FC = () => {
     }
   };
 
-  
   return (
     <div className="grid md:grid-cols-5 w-full min-h-screen">
       <SideDesign />
@@ -232,7 +239,7 @@ const PasswordVerification: React.FC = () => {
               void handleVerify();
             }}
           >
-            {/* OTP inputs — responsive & wrap-safe */}
+            {/* OTP inputs */}
             <div className="flex flex-wrap items-center justify-center gap-2 sm:gap-3 md:gap-4">
               {Array.from({ length: 6 }).map((_, i) => (
                 <input

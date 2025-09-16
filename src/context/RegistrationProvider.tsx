@@ -156,6 +156,7 @@ export function RegistrationProvider({ children }: { children: ReactNode }) {
     }
   }, [registrationData, signupActive]);
 
+  
   // Ephemeral OTP token (never persisted)
   const [tempToken, setTempToken] = useState<string>("");
 

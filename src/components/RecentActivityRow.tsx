@@ -9,10 +9,10 @@ interface RecentActivityRowProps {
 const RecentActivityRow: React.FC<RecentActivityRowProps> = ({ text, time }) => {
   return (
     <div className="flex items-start gap-3">
-      <FaUserCircle className="text-primary-purple text-2xl" />
-      <div>
-        <p className="text-sm text-slate-800">{text}</p>
-        <span className="text-xs text-slate-500">{time}</span>
+      <FaUserCircle className="text-primary-purple md:text-2xl text-xl mt-1" />
+      <div className="flex flex-col items-start gap-1">
+        <p className="md:text-sm text-xs text-gray-700">{text}</p>
+        <span className="text-[10px] text-gray-400">{time}</span>
       </div>
     </div>
   );

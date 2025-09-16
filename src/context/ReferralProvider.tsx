@@ -1,11 +1,13 @@
+// src/context/ReferralProvider.tsx
 import React, {
   createContext,
   useCallback,
   useContext,
-  useEffect,
   useMemo,
   useState,
+  useEffect,
 } from "react";
+import { toast } from "react-toastify";
 import type { Referral } from "../components/ReferralRow";
 
 type Ctx = {
@@ -33,47 +35,49 @@ export const ReferralProvider: React.FC<{ children: React.ReactNode }> = ({
   const [referrals, setReferrals] = useState<Referral[]>([]);
 
   const loadReferrals = useCallback(async () => {
+    const token = localStorage.getItem("accessToken");
+    if (!token) return;
+
     setLoading(true);
     setError(null);
     try {
-      const token = localStorage.getItem("accessToken");
-
       const res = await fetch(`${serverUrl}/refer/list_company_referral/`, {
-        method: "GET",
+        method: "POST",
         headers: {
           Accept: "application/json",
-          Authorization: token ? `Bearer ${token}` : "",
+          Authorization: `Bearer ${token}`,
         },
       });
 
-      
       if (!res.ok) {
         const errTxt = await res.text();
-        console.error("[referrals_list] error response:", errTxt);
-        setError(`Failed (${res.status})`);
+        const msg = `Error ${res.status}: ${errTxt || res.statusText}`;
+        setError(msg);
+        toast.error(msg);
         setReferrals([]);
         return;
       }
 
       const data = await res.json();
-      console.log("[referrals_list] full json:", data);
-
-      const arr = Array.isArray(data) ? data : Array.isArray(data?.referrals) ? data.referrals : [];
-      console.log("[referrals_list] extracted array:", arr);
+      // console.log(data);
+      const arr = Array.isArray(data?.referrals) ? data.referrals : [];
 
       const mapped: Referral[] = arr.map((r: any) => ({
         id: String(r.id),
-        companyName: r.company_name ?? "Unknown",
-        companyType: r.company_type ?? "—",
-        industry: r.industry ?? "—",
-        status: r.status ?? "pending",
-        urgency: r.urgency ?? "normal",
+        reference_id: r.reference_id ?? "",
+        referred_to_name: r.referred_to_name ?? "—",
+        industry: r.industry ?? "—", 
+        assigned_to_name: r.assigned_to_name ?? null,
+        status: r.status ?? "—" ,
+        urgency: r.urgency ?? "—",
       }));
 
       setReferrals(mapped);
-    } catch (err) {
+    } catch (err: any) {
       console.error("[referrals_list] network error:", err);
-      setError("Network error");
+      const msg = err?.message || "Network error";
+      setError(msg);
+      toast.error(msg);
       setReferrals([]);
     } finally {
       setLoading(false);

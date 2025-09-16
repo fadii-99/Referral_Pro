@@ -2,78 +2,74 @@ import React, { useState } from "react";
 import Button from "../components/Button";
 import EditProfileModal from "../components/modals/EditProfileModal";
 import { FiMail, FiPhone } from "react-icons/fi";
-
-export type ProfileData = {
-  name: string;
-  email: string;
-  phone: string;
-  avatar: string;
-};
+import { useUserContext } from "../context/UserProvider";
+import SmallLoader from "../components/SmallLoader";
 
 const Profile: React.FC = () => {
-  // dummy initial data
-  const [me, setMe] = useState<ProfileData>({
-    name: "John Smith",
-    email: "jaywilliams@gmail.com",
-    phone: "000 1234567",
-    avatar: "https://i.pravatar.cc/160?img=12",
-  });
-
+  const { user, loading } = useUserContext();
   const [open, setOpen] = useState(false);
+
+  if (loading) {
+    return (
+      <div className="flex justify-center items-center min-h-screen">
+        <SmallLoader />
+      </div>
+    );
+  }
+
+  if (!user) {
+    return (
+      <div className="p-10 text-center text-gray-500">Failed to load profile.</div>
+    );
+  }
+
 
   return (
     <div className="p-10">
-
-      {/* Card */}
-      <div className="bg-white rounded-2xl border border-black/5 shadow-sm p-10 max-w-4xl mx-auto">
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 items-center">
-          {/* Left: Image */}
-          <div className="flex items-center md:justify-start justify-center border-r col-span-1 pr-4">
-            <img
-              src={me.avatar}
-              alt={me.name}
-              className="h-full w-full rounded-full object-cover ring-2 ring-white shadow"
-            />
+      <div className="bg-white rounded-2xl border border-black/5 shadow-sm sm:p-10 p-8 max-w-4xl mx-auto">
+        <div className="grid grid-cols-1 md:grid-cols-3 md:gap-6 items-center">
+          <div className="flex items-center md:justify-start justify-center md:border-r col-span-1 md:pr-4 md:mb-0 mb-8">
+            {user.avatar && (
+              <img
+                src={user.avatar}
+                alt={user.name}
+                className="h-40 w-40 rounded-full object-cover ring-2 ring-white shadow"
+              />
+            )}
           </div>
 
-          {/* Right: Info */}
           <div className="col-span-2">
-            <div className="text-3xl font-semibold text-primary-blue">{me.name}</div>
+            <div className="text-3xl font-semibold text-primary-blue">
+              {user.name}
+            </div>
 
-            <div className="mt-3 flex flex-wrap items-center gap-5 text-[13px] text-gray-500">
+            <div className="mt-3 flex flex-wrap items-center sm:gap-5 gap-3 sm:text-sm text-xs text-gray-500">
               <span className="inline-flex items-center gap-2">
                 <FiMail className="text-primary-purple" />
-                {me.email}
+                {user.email}
               </span>
-              <span className="inline-flex items-center gap-2">
-                <FiPhone className="text-primary-purple" />
-                {me.phone}
-              </span>
+              {user.phone && (
+                <span className="inline-flex items-center gap-2">
+                  <FiPhone className="text-primary-purple" />
+                  {user.phone}
+                </span>
+              )}
             </div>
 
             <div className="mt-10">
               <Button
                 text="Edit Profile"
+                onClick={() => setOpen(true)}
                 fullWidth={false}
                 mt="mt-0"
                 py="py-2 sm:py-3"
-                onClick={() => setOpen(true)}
               />
             </div>
           </div>
         </div>
       </div>
 
-      {/* Modal */}
-      <EditProfileModal
-        open={open}
-        profile={me}
-        onClose={() => setOpen(false)}
-        onSave={(updated) => {
-          setMe(updated);
-          setOpen(false);
-        }}
-      />
+      <EditProfileModal open={open} onClose={() => setOpen(false)} />
     </div>
   );
 };
