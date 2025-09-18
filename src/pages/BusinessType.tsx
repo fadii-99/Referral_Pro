@@ -37,7 +37,6 @@ const BusinessType: React.FC = () => {
 
   const isContractor = registrationData.profileType === "contractor";
 
-
   const [type, setType] = useState<BizType>(registrationData.bizType);
   const [years, setYears] = useState(registrationData.years);
   const [employees, setEmployees] = useState(registrationData.employees);
@@ -49,32 +48,36 @@ const BusinessType: React.FC = () => {
 
   const [loading] = useState(false);
 
-  useEffect(() => {
-    if (isContractor && type !== "sole") {
+   useEffect(() => {
+    if (isContractor) {
+      // Contractor → hamesha sole lock
       setType("sole");
       setRegistrationData((prev) => ({ ...prev, bizType: "sole" }));
+    } else {
+      // Company → agar pehle se koi type set hai to use karo
+      if (registrationData.bizType) {
+        setType(registrationData.bizType);
+      }
     }
-  }, [isContractor, type, setRegistrationData]);
 
-  useEffect(() => {
-    setType(registrationData.bizType);
+    // Sync other fields always
     setYears(registrationData.years);
     setEmployees(registrationData.employees);
     setUsState(registrationData.usState);
-  }, [
-    registrationData.bizType,
-    registrationData.years,
-    registrationData.employees,
-    registrationData.usState,
-  ]);
+
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleContinue: React.MouseEventHandler<HTMLButtonElement> = () => {
+    if (!type && !isContractor) {
+    toast.error("Please select a business type.");
+    return;
+  }
     if (!years.trim() || !employees.trim()) {
       toast.error("Please fill out all fields.");
       return;
     }
 
-    // Guard again here so payload is always correct
     const nextType: BizType = isContractor ? "sole" : type;
 
     setRegistrationData((prev) => ({
@@ -140,8 +143,6 @@ const BusinessType: React.FC = () => {
 
         <div className="flex-1 flex items-center justify-center px-4 sm:mt-0 mt-4">
           <div className="w-full max-w-lg">
-           
-
             {/* Type Grid / Read-only */}
             <div className="mb-4">
               <label className="block text-[11px] text-primary-blue font-semibold mb-2">
@@ -151,7 +152,6 @@ const BusinessType: React.FC = () => {
               {isContractor ? (
                 <div className="w-full rounded-3xl bg-white border border-gray-200 px-4 py-3 flex items-center justify-between">
                   <span className="text-xs sm:text-sm text-gray-800">Sole Proprietorship</span>
-               
                 </div>
               ) : (
                 <div className="grid grid-cols-2 md:grid-cols-3 gap-3 md:gap-4">

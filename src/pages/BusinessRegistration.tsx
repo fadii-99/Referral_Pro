@@ -11,14 +11,17 @@ import "react-toastify/dist/ReactToastify.css";
 import { RegistrationContext } from "../context/RegistrationProvider";
 
 const INDUSTRIES = [
-  "Technology",
-  "Finance",
-  "Healthcare",
-  "Education",
-  "Retail & E-commerce",
-  "Manufacturing",
-  "Logistics",
+  "Plumber",
+  // "Legal",
+  // "HVAC",
+  "Electrician",
+  "Cleaner",
+  "Painter",
+  "Landscape",
+  "Contractor",
+  "Spa"
 ];
+
 
 const BusinessRegistration: React.FC = () => {
   const navigate = useNavigate();
@@ -46,27 +49,35 @@ const BusinessRegistration: React.FC = () => {
     setCompanyName(registrationData.companyName || "");
   }, [registrationData]);
 
-  const handleContinue: React.MouseEventHandler<HTMLButtonElement> = () => {
-    const missingBasics =
-      !firstName.trim() || !lastName.trim() || !email.trim() || !industry.trim();
-    const missingCompany = isCompany && !companyName.trim();
+ const handleContinue: React.MouseEventHandler<HTMLButtonElement> = () => {
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-    if (missingBasics || missingCompany) {
-      toast.error("Please fill out all fields.");
-      return;
-    }
+  const missingBasics =
+    !firstName.trim() || !lastName.trim() || !email.trim() || !industry.trim();
+  const missingCompany = isCompany && !companyName.trim();
 
-    setRegistrationData(prev => ({
-      ...prev,
-      firstName: firstName.trim(),
-      lastName : lastName.trim(),
-      email    : email.trim(),
-      industry : industry.trim(),
-      companyName: isCompany ? companyName.trim() : "", // clear if not company
-    }));
+  if (missingBasics || missingCompany) {
+    toast.error("Please fill out all fields.");
+    return;
+  }
 
-    navigate("/BusinessType");
-  };
+  if (!emailRegex.test(email)) {
+    toast.error("Please enter a valid email address.");
+    return;
+  }
+
+  setRegistrationData(prev => ({
+    ...prev,
+    firstName: firstName.trim(),
+    lastName : lastName.trim(),
+    email    : email.trim(),
+    industry : industry.trim(),
+    companyName: isCompany ? companyName.trim() : "", // clear if not company
+  }));
+
+  navigate("/BusinessType");
+};
+
 
   return (
     <div className="grid md:grid-cols-5 w-full min-h-screen">
@@ -140,6 +151,7 @@ const BusinessRegistration: React.FC = () => {
                   </span>
                   <input
                     type="email"
+                    required
                     placeholder="Enter your email"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}

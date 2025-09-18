@@ -1,12 +1,11 @@
-// src/context/RegistrationProvider.tsx
 import React, { createContext, useEffect, useState } from "react";
 import type { ReactNode } from "react";
 
 /** Domain types */
-export type BizType = "sole" | "partnership" | "nonprofit" | "corporation" | "llc" | "other";
+export type BizType = "sole" | "partnership" | "nonprofit" | "corporation" | "llc" | "other" | "";
 export type ProfileType = "company" | "contractor" | "";
 export type Billing = "monthly" | "yearly";
-export type PlanId = 0 | 1 | null;
+export type PlanId = 0 | 1 | 3 | null;
 export type PaymentType = "bank" | "stripe" | "";
 
 /** Persisted registration data (only during signup) */
@@ -34,11 +33,11 @@ export interface RegistrationData {
   phone: string;
   website: string;
 
-  // Payment (card) — we typically keep these local to the page, but keeping fields here
+  // Payment (card)
   cardName: string;
   cardNumber: string;
   expMonthValue: string;
-  exp: string; // MM/YY (derived)
+  exp: string;
   cvv: string;
   billingAddress1: string;
   billingAddress2: string;
@@ -51,7 +50,6 @@ export interface RegistrationData {
   subscriptionPlanId: PlanId;
   subscriptionSeats: number;
 
-  // Pricing in USD for payload/UI
   subscriptionCurrency: "USD" | "";
   subscriptionTotal: number;
   subscriptionTotalDisplay: string;
@@ -65,16 +63,13 @@ export interface RegistrationContextValue {
   registrationData: RegistrationData;
   setRegistrationData: React.Dispatch<React.SetStateAction<RegistrationData>>;
 
-  /** Ephemeral token (OTP step). Not persisted. */
   tempToken: string;
   setTempToken: React.Dispatch<React.SetStateAction<string>>;
 
-  /** Signup scope controls */
   startSignup: () => void;
   finishSignup: (opts?: { clear?: boolean }) => void;
   clearRegistrationData: () => void;
 
-  /** Is signup persistence active right now? */
   signupActive: boolean;
 }
 
@@ -86,7 +81,8 @@ const DEFAULT_DATA: RegistrationData = {
   companyName: "",
   industry: "",
 
-  bizType: "sole",
+  bizType: "", 
+
   years: "",
   employees: "",
   usState: "",
@@ -116,7 +112,7 @@ const DEFAULT_DATA: RegistrationData = {
   subscriptionTotal: 0,
   subscriptionTotalDisplay: "",
 
-  paymentType: "",
+  paymentType: "stripe",
 };
 
 const STORAGE_KEY = "registrationData";
@@ -125,7 +121,6 @@ const SCOPE_KEY = "signup:active";
 export const RegistrationContext = createContext<RegistrationContextValue | undefined>(undefined);
 
 export function RegistrationProvider({ children }: { children: ReactNode }) {
-  // Scope flag — only when true do we read/write localStorage
   const [signupActive, setSignupActive] = useState<boolean>(() => {
     try {
       return sessionStorage.getItem(SCOPE_KEY) === "1";
@@ -134,7 +129,6 @@ export function RegistrationProvider({ children }: { children: ReactNode }) {
     }
   });
 
-  // Rehydrate from LS only if signup is active
   const [registrationData, setRegistrationData] = useState<RegistrationData>(() => {
     if (!signupActive) return { ...DEFAULT_DATA };
     try {
@@ -146,18 +140,13 @@ export function RegistrationProvider({ children }: { children: ReactNode }) {
     }
   });
 
-  // Only persist when signup is active
   useEffect(() => {
     if (!signupActive) return;
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(registrationData));
-    } catch {
-      // ignore
-    }
+    } catch {}
   }, [registrationData, signupActive]);
 
-  
-  // Ephemeral OTP token (never persisted)
   const [tempToken, setTempToken] = useState<string>("");
 
   const startSignup = () => {

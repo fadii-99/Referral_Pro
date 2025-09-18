@@ -111,6 +111,7 @@ const PasswordCreation: React.FC = () => {
                   </span>
                   <button
                     type="button"
+                     tabIndex={-1} 
                     onClick={() => setShowPwd((s) => !s)}
                     className="absolute right-4 top-1/2 -translate-y-1/2 text-primary-purple"
                     aria-label={showPwd ? "Hide password" : "Show password"}
@@ -141,6 +142,7 @@ const PasswordCreation: React.FC = () => {
                   </span>
                   <button
                     type="button"
+                     tabIndex={-1} 
                     onClick={() => setShowConfirm((s) => !s)}
                     className="absolute right-4 top-1/2 -translate-y-1/2 text-primary-purple"
                     aria-label={showConfirm ? "Hide confirm password" : "Show confirm password"}

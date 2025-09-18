@@ -133,17 +133,19 @@ const CreatePassword: React.FC = () => {
                 </span>
 
                 <button
-                  type="button"
-                  aria-label={show.pwd ? "Hide password" : "Show password"}
-                  onClick={() => setShow((s) => ({ ...s, pwd: !s.pwd }))}
-                  className="absolute right-4 top-1/2 -translate-y-1/2 p-1 text-primary-purple hover:opacity-90 transition"
-                >
-                  {show.pwd ? (
-                    <AiOutlineEyeInvisible className="h-5 w-5" />
-                  ) : (
-                    <AiOutlineEye className="h-5 w-5" />
-                  )}
-                </button>
+                    type="button"
+                    tabIndex={-1}   // 👈 added
+                    aria-label={show.pwd ? "Hide password" : "Show password"}
+                    onClick={() => setShow((s) => ({ ...s, pwd: !s.pwd }))}
+                    className="absolute right-4 top-1/2 -translate-y-1/2 p-1 text-primary-purple hover:opacity-90 transition"
+                  >
+                    {show.pwd ? (
+                      <AiOutlineEyeInvisible className="h-5 w-5" />
+                    ) : (
+                      <AiOutlineEye className="h-5 w-5" />
+                    )}
+                  </button>
+
 
                 <input
                   id="password"
@@ -178,6 +180,7 @@ const CreatePassword: React.FC = () => {
 
                 <button
                   type="button"
+                  tabIndex={-1}   // 👈 added
                   aria-label={show.cpwd ? "Hide confirm password" : "Show confirm password"}
                   onClick={() => setShow((s) => ({ ...s, cpwd: !s.cpwd }))}
                   className="absolute right-4 top-1/2 -translate-y-1/2 p-1 text-primary-purple hover:opacity-90 transition"
@@ -188,6 +191,7 @@ const CreatePassword: React.FC = () => {
                     <AiOutlineEye className="h-5 w-5" />
                   )}
                 </button>
+
 
                 <input
                   id="confirmPassword"

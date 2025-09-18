@@ -1,9 +1,9 @@
 import React from "react";
-import { HashLoader } from "react-spinners";
+import logo from "./../assets/referralProLogo.png";
+
 
 const Loader: React.FC<{ fullscreen?: boolean; label?: string }> = ({
   fullscreen = true,
-  label = "Loading…",
 }) => {
   const Wrapper = ({ children }: { children: React.ReactNode }) => (
     <div
@@ -18,10 +18,14 @@ const Loader: React.FC<{ fullscreen?: boolean; label?: string }> = ({
 
   return (
     <Wrapper>
-      <HashLoader size={80} color="#02025c" speedMultiplier={1.3} />
-      <p className="mt-6 text-primary-blue font-semibold text-sm animate-pulse">
+      <img
+        src={logo}
+        alt="Loader Logo"
+        className="h-10 w-auto animate-fadeInOut"
+      />
+      {/* <p className="mt-6 text-primary-blue font-semibold text-sm ">
         {label}
-      </p>
+      </p> */}
     </Wrapper>
   );
 };

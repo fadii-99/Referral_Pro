@@ -48,3 +48,21 @@ input:-webkit-autofill {
 .animate-fadeIn {
   animation: fadeIn 0.2s ease-out;
 }
+
+
+
+
+
+
+@keyframes fadeInOut {
+  0%, 100% {
+    opacity: 0.3;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+.animate-fadeInOut {
+  animation: fadeInOut 0.5s ease-in-out infinite;
+}

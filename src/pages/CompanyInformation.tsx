@@ -35,23 +35,24 @@ const CompanyInformation: React.FC = () => {
 
 
   const handleContinue: React.MouseEventHandler<HTMLButtonElement> = () => {
-    if (!address1.trim() || !address2.trim() || !city.trim() || !postCode.trim() || !phone.trim() || !website.trim()) {
-      toast.error("Please fill out all fields.");
-      return;
-    }
+  if (!address1.trim() || !city.trim() || !postCode.trim() || !phone.trim() || !website.trim()) {
+    toast.error("Please fill out all required fields.");
+    return;
+  }
 
-    setRegistrationData((prev) => ({
-      ...prev,
-      address1: address1.trim(),
-      address2: address2.trim(),
-      city: city.trim(),
-      postCode: postCode.trim(),
-      phone: phone.trim(),
-      website: website.trim(),
-    }));
+  setRegistrationData((prev) => ({
+    ...prev,
+    address1: address1.trim(),
+    address2: address2.trim(), // optional, empty bhi save ho sakta hai
+    city: city.trim(),
+    postCode: postCode.trim(),
+    phone: phone.trim(),
+    website: website.trim(),
+  }));
 
-    navigate("/PasswordCreation");
-  };
+  navigate("/PasswordCreation");
+};
+
 
   
   return (

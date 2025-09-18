@@ -1,19 +1,16 @@
-import React, { useContext, useMemo, useState } from "react";
+import React, { useContext, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import SideDesign from "../components/SideDesign";
 import Button from "../components/Button";
 import MultiStepHeader from "./../components/MultiStepHeader";
 import { RegistrationContext } from "../context/RegistrationProvider";
 
-type Billing = "monthly" | "yearly";
-type PlanKey = "starter" | "growth";
+type Billing = "monthly" | "yearly" | "";
+type PlanKey = "starter" | "growth" | "custom";
 
-const PLAN_ORDER: Record<PlanKey, 0 | 1> = { starter: 0, growth: 1 };
+const PLAN_ORDER: Record<Exclude<PlanKey, "custom">, 0 | 1> = { starter: 0, growth: 1 };
 
-const PLAN_META: Record<
-  PlanKey,
-  { name: string; seatsLabel: string; baseSeats: number; monthlyPrice: number }
-> = {
+const PLAN_META = {
   starter: { name: "Starter", seatsLabel: "5 seats", baseSeats: 5, monthlyPrice: 99 },
   growth: { name: "Growth", seatsLabel: "25 seats", baseSeats: 25, monthlyPrice: 299 },
 };
@@ -21,12 +18,33 @@ const PLAN_META: Record<
 const money = (n: number) => `$${Math.round(n).toLocaleString()}`;
 const yearlyWithDiscount = (monthlyTotal: number) => Math.round(monthlyTotal * 12 * 0.9);
 
-function computeTotals(plan: PlanKey, mode: Billing) {
+function computeTotals(plan: PlanKey, mode: Billing, customSeats?: number) {
+  if (plan === "custom") {
+    const perSeat = 20;
+    const monthlyTotal = (customSeats || 5) * perSeat;
+    const total =
+      mode === "monthly" ? monthlyTotal : mode === "yearly" ? monthlyTotal * 12 : 0;
+    return {
+      total,
+      display: total ? `${money(total)}${mode === "monthly" ? "/mon" : "/yr"}` : "—",
+      currency: "USD" as const,
+    };
+  }
+
   const meta = PLAN_META[plan];
-  const cardBaseMonthly = Math.ceil(meta.monthlyPrice / meta.baseSeats) * meta.baseSeats - 1;
-  const total = mode === "monthly" ? cardBaseMonthly : yearlyWithDiscount(cardBaseMonthly);
-  const display = `${money(total)}${mode === "monthly" ? "/mon" : "/yr"}`;
-  return { total, display, currency: "USD" as const };
+  const cardBaseMonthly =
+    Math.ceil(meta.monthlyPrice / meta.baseSeats) * meta.baseSeats - 1;
+  const total =
+    mode === "monthly"
+      ? cardBaseMonthly
+      : mode === "yearly"
+      ? yearlyWithDiscount(cardBaseMonthly)
+      : 0;
+  return {
+    total,
+    display: total ? `${money(total)}${mode === "monthly" ? "/mon" : "/yr"}` : "—",
+    currency: "USD" as const,
+  };
 }
 
 const SubscriptionPlan: React.FC = () => {
@@ -39,45 +57,92 @@ const SubscriptionPlan: React.FC = () => {
     (registrationData.subscriptionBilling as Billing) || "monthly"
   );
 
-  const [selectedPlanId, setSelectedPlanId] = useState<0 | 1 | null>(
+  const [selectedPlanId, setSelectedPlanId] = useState<0 | 1 | 3 | null>(
     registrationData.subscriptionPlanId
   );
 
-  const [paymentType, setPaymentType] = useState<"bank" | "stripe" | "">(
-    registrationData.paymentType || ""
+  const [paymentType] = useState<"stripe">("stripe"); // Stripe only
+
+  // 🔽 Custom plan state
+  const [customSeats, setCustomSeats] = useState<number>(
+    registrationData.subscriptionPlanId === 3
+      ? registrationData.subscriptionSeats || 5
+      : 5
+  );
+  const [customBilling, setCustomBilling] = useState<Billing>(
+    registrationData.subscriptionPlanId === 3
+      ? (registrationData.subscriptionBilling as Billing)
+      : ""
   );
 
-  const perSeatStarter = useMemo(
-    () => Math.ceil(PLAN_META.starter.monthlyPrice / PLAN_META.starter.baseSeats),
-    []
-  );
+  // Starter/Growth billing
+  const handleBillingSwitch = (mode: Billing) => {
+    // agar custom select hai aur top tab dabaya → default Starter pe switch
+    if (selectedPlanId === null || selectedPlanId === 3) {
+      setSelectedPlanId(0); // default Starter
+      setBilling(mode);
+      const totals = computeTotals("starter", mode);
+      setRegistrationData((prev) => ({
+        ...prev,
+        subscriptionBilling: mode,
+        subscriptionPlanId: 0,
+        subscriptionSeats: PLAN_META.starter.baseSeats,
+        subscriptionCurrency: totals.currency,
+        subscriptionTotal: totals.total,
+        subscriptionTotalDisplay: totals.display,
+      }));
+      return;
+    }
 
-  const cardPrice = (plan: PlanKey, mode: Billing) => {
-    const meta = PLAN_META[plan];
-    const cardBaseMonthly = Math.ceil(meta.monthlyPrice / meta.baseSeats) * meta.baseSeats - 1;
-    return mode === "monthly" ? cardBaseMonthly : yearlyWithDiscount(cardBaseMonthly);
+    // agar Starter/Growth hai
+    setBilling(mode);
+    const planKey: PlanKey = selectedPlanId === 0 ? "starter" : "growth";
+    const totals = computeTotals(planKey, mode);
+    setRegistrationData((prev) => ({
+      ...prev,
+      subscriptionBilling: mode,
+      subscriptionPlanId: selectedPlanId,
+      subscriptionSeats:
+        selectedPlanId === 0
+          ? PLAN_META.starter.baseSeats
+          : PLAN_META.growth.baseSeats,
+      subscriptionCurrency: totals.currency,
+      subscriptionTotal: totals.total,
+      subscriptionTotalDisplay: totals.display,
+    }));
   };
 
-  const handleBillingSwitch = (mode: Billing) => {
-    setBilling(mode);
-
-    setRegistrationData((prev) => {
-      let next = { ...prev, subscriptionBilling: mode };
-      if (selectedPlanId !== null) {
-        const planKey: PlanKey = selectedPlanId === 0 ? "starter" : "growth";
-        const totals = computeTotals(planKey, mode);
-        next = {
-          ...next,
-          subscriptionCurrency: totals.currency,
-          subscriptionTotal: totals.total,
-          subscriptionTotalDisplay: totals.display,
-        };
-      }
-      return next;
-    });
+  // Custom billing select
+  const handleCustomBillingSelect = (mode: Billing) => {
+    setCustomBilling(mode);
+    const totals = computeTotals("custom", mode, customSeats);
+    setRegistrationData((prev) => ({
+      ...prev,
+      subscriptionBilling: mode,
+      subscriptionPlanId: 3,
+      subscriptionSeats: customSeats,
+      subscriptionCurrency: totals.currency,
+      subscriptionTotal: totals.total,
+      subscriptionTotalDisplay: totals.display,
+    }));
   };
 
   const handleSelectPlan = (plan: PlanKey) => {
+    if (plan === "custom") {
+      setSelectedPlanId(3);
+      setCustomBilling("");
+      setRegistrationData((prev) => ({
+        ...prev,
+        subscriptionPlanId: 3,
+        subscriptionSeats: customSeats,
+        subscriptionBilling: "",
+        subscriptionCurrency: "USD",
+        subscriptionTotal: 0,
+        subscriptionTotalDisplay: "—",
+      }));
+      return;
+    }
+
     const planId = PLAN_ORDER[plan];
     const seats = PLAN_META[plan].baseSeats;
     const totals = computeTotals(plan, billing);
@@ -94,22 +159,15 @@ const SubscriptionPlan: React.FC = () => {
     }));
   };
 
-  const handleSelectPayment = (type: "bank" | "stripe") => {
-    setPaymentType(type);
-    setRegistrationData((prev) => ({
-      ...prev,
-      paymentType: type,
-    }));
-  };
-
   const handleContinue: React.MouseEventHandler<HTMLButtonElement> = () => {
-    if (selectedPlanId === null || !paymentType) return;
+    if (selectedPlanId === null) return;
+    if (selectedPlanId === 3 && (!customSeats || !customBilling)) return;
     navigate("/PaymentMethod");
   };
 
-  const PlanCard: React.FC<{ id: PlanKey }> = ({ id }) => {
+  const PlanCard: React.FC<{ id: "starter" | "growth" }> = ({ id }) => {
     const meta = PLAN_META[id];
-    const price = cardPrice(id, billing);
+    const totals = computeTotals(id, billing);
     const planId = PLAN_ORDER[id];
     const selected = selectedPlanId === planId;
 
@@ -142,29 +200,33 @@ const SubscriptionPlan: React.FC = () => {
         </div>
 
         <div className="mt-4">
-          <span className="text-3xl font-bold tracking-tight">{money(price)}</span>
-          <span className="ml-1 text-sm opacity-80">{billing === "monthly" ? "/mon" : "/yr"}</span>
+          <span className="text-3xl font-bold tracking-tight">
+            {money(totals.total)}
+          </span>
+          <span className="ml-1 text-sm opacity-80">
+            {billing === "monthly" ? "/mon" : "/yr"}
+          </span>
         </div>
 
         <div className="mt-2 text-xs opacity-70">
           {billing === "yearly"
             ? "10% off with annual prepayment"
-            : `~${money(perSeatStarter)}/seat baseline`}
+            : `~${money(Math.ceil(meta.monthlyPrice / meta.baseSeats))}/seat baseline`}
         </div>
       </button>
     );
   };
 
   const PaymentCard: React.FC<{
-    type: "bank" | "stripe";
+    type: Billing;
     label: string;
-    helper?: string;
-  }> = ({ type, label, helper }) => {
-    const selected = paymentType === type;
+    selected: boolean;
+    onClick: () => void;
+  }> = ({ label, selected, onClick }) => {
     return (
       <button
         type="button"
-        onClick={() => handleSelectPayment(type)}
+        onClick={onClick}
         className={[
           "w-full rounded-xl sm:px-4 px-3 py-3 border text-left transition-all",
           selected
@@ -173,12 +235,7 @@ const SubscriptionPlan: React.FC = () => {
         ].join(" ")}
       >
         <div className="flex items-center justify-between">
-          <div>
-            <div className="sm:text-sm text-xs font-semibold text-primary-blue">{label}</div>
-            {helper ? (
-              <div className="text-[11px] text-primary-blue/70 mt-0.5">{helper}</div>
-            ) : null}
-          </div>
+          <div className="sm:text-sm text-xs font-semibold text-primary-blue">{label}</div>
           <div
             className={[
               "w-5 h-5 rounded-full border flex items-center justify-center",
@@ -210,14 +267,19 @@ const SubscriptionPlan: React.FC = () => {
 
         <div className="flex-1 flex items-center justify-center px-4 sm:mt-0 mt-6">
           <div className="w-full max-w-lg">
+            {/* Tabs */}
             <div className="flex items-center gap-6 text-sm font-semibold text-primary-blue mb-3">
               <button
                 type="button"
                 onClick={() => handleBillingSwitch("monthly")}
-                className={`relative pb-2 ${billing === "monthly" ? "text-primary-purple" : "text-primary-blue/70"}`}
+                className={`relative pb-2 ${
+                  billing === "monthly" && selectedPlanId !== 3
+                    ? "text-primary-purple"
+                    : "text-primary-blue/70"
+                }`}
               >
                 Monthly
-                {billing === "monthly" && (
+                {billing === "monthly" && selectedPlanId !== 3 && (
                   <span className="absolute left-0 -bottom-[2px] h-0.5 w-full bg-primary-purple rounded-full" />
                 )}
               </button>
@@ -225,53 +287,159 @@ const SubscriptionPlan: React.FC = () => {
               <button
                 type="button"
                 onClick={() => handleBillingSwitch("yearly")}
-                className={`relative pb-2 ${billing === "yearly" ? "text-primary-purple" : "text-primary-blue/70"}`}
+                className={`relative pb-2 ${
+                  billing === "yearly" && selectedPlanId !== 3
+                    ? "text-primary-purple"
+                    : "text-primary-blue/70"
+                }`}
               >
                 Yearly
-                {billing === "yearly" && (
+                {billing === "yearly" && selectedPlanId !== 3 && (
+                  <span className="absolute left-0 -bottom-[2px] h-0.5 w-full bg-primary-purple rounded-full" />
+                )}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => handleSelectPlan("custom")}
+                className={`relative pb-2 ${
+                  selectedPlanId === 3 ? "text-primary-purple" : "text-primary-blue/70"
+                }`}
+              >
+                Custom
+                {selectedPlanId === 3 && (
                   <span className="absolute left-0 -bottom-[2px] h-0.5 w-full bg-primary-purple rounded-full" />
                 )}
               </button>
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
-              <PlanCard id="starter" />
-              <PlanCard id="growth" />
-            </div>
+            {/* Custom tab content */}
+            {selectedPlanId === 3 && (
+              <div className="mb-4">
+                <h4 className="text-sm font-semibold text-primary-blue mb-2 mt-6">
+                  Select custom seats
+                </h4>
+                <label className="block text-xs text-primary-blue/70 mb-1">
+                  Per seat: $20
+                </label>
+                <input
+                  type="range"
+                  min={5}
+                  max={500}
+                  step={5}
+                  value={customSeats}
+                  onChange={(e) => {
+                    const val = Number(e.target.value);
+                    setCustomSeats(val);
+                    const totals = computeTotals("custom", customBilling, val);
+                    setRegistrationData((prev) => ({
+                      ...prev,
+                      subscriptionSeats: val,
+                      subscriptionTotal: totals.total,
+                      subscriptionTotalDisplay: totals.display,
+                      subscriptionCurrency: totals.currency,
+                      subscriptionPlanId: 3,
+                      subscriptionBilling: customBilling,
+                    }));
+                  }}
+                  className="w-full accent-primary-purple"
+                />
+                <div className="flex justify-between text-xs text-primary-blue font-semibold mt-1 mb-6">
+                  <span>Seats: {customSeats}</span>
+                  <span>
+                    Total:{" "}
+                    {customBilling === "monthly"
+                      ? `$${customSeats * 20}/mon`
+                      : customBilling === "yearly"
+                      ? `$${customSeats * 20 * 12}/yr`
+                      : "—"}
+                  </span>
+                </div>
 
+                {/* Duration cards */}
+                <div className="mt-4">
+                  <div className="text-xs text-primary-blue font-semibold mb-2">
+                    Duration
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <PaymentCard
+                      type="monthly"
+                      label="Monthly"
+                      selected={customBilling === "monthly"}
+                      onClick={() => handleCustomBillingSelect("monthly")}
+                    />
+                    <PaymentCard
+                      type="yearly"
+                      label="Yearly"
+                      selected={customBilling === "yearly"}
+                      onClick={() => handleCustomBillingSelect("yearly")}
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Starter/Growth plans */}
+            {selectedPlanId !== 3 && (
+              <div className="grid grid-cols-2 gap-4">
+                <PlanCard id="starter" />
+                <PlanCard id="growth" />
+              </div>
+            )}
+
+            {/* Payment type (always stripe card visible) */}
             <div className="mt-6">
               <div className="text-xs text-primary-blue font-semibold mb-2">
                 Payment method
               </div>
-              <div className="grid grid-cols-2 gap-3">
-                <PaymentCard type="bank" label="Bank Transfer" />
-                <PaymentCard type="stripe" label="Stripe"  />
+              <div className="grid grid-cols-1 gap-3">
+                <div className="w-full rounded-xl sm:px-4 px-3 py-3 border bg-white border-primary-purple ring-2 ring-primary-purple/30">
+                  <div className="flex items-center justify-between">
+                    <div className="sm:text-sm text-xs font-semibold text-primary-blue">
+                      Stripe
+                    </div>
+                    <div className="w-5 h-5 rounded-full border border-primary-purple flex items-center justify-center">
+                      <span className="w-2.5 h-2.5 rounded-full bg-primary-purple" />
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
 
+            {/* Selection Summary */}
             <div className="mt-6">
-              <div className="text-xs text-primary-blue font-semibold mb-2">Your selection</div>
+              <div className="text-xs text-primary-blue font-semibold mb-2">
+                Your selection
+              </div>
               <div className="grid grid-cols-2 gap-2 text-xs">
                 <div className="text-primary-blue/80">Billing</div>
                 <div className="text-right text-primary-blue font-semibold">
-                  {billing}
+                  {selectedPlanId === 3 ? customBilling || "—" : billing}
                 </div>
 
                 <div className="text-primary-blue/80">Plan</div>
                 <div className="text-right text-primary-blue font-semibold">
-                  {selectedPlanId === 0 ? "Starter" : selectedPlanId === 1 ? "Growth" : "—"}
+                  {selectedPlanId === 0
+                    ? "Starter"
+                    : selectedPlanId === 1
+                    ? "Growth"
+                    : "Custom"}
                 </div>
 
                 <div className="text-primary-blue/80">Seats</div>
                 <div className="text-right text-primary-blue font-semibold">
-                  {selectedPlanId === null
+                  {selectedPlanId === 3
+                    ? `Custom seats (${customSeats})`
+                    : selectedPlanId === null
                     ? "—"
-                    : (selectedPlanId === 0 ? PLAN_META.starter.baseSeats : PLAN_META.growth.baseSeats)}
+                    : selectedPlanId === 0
+                    ? PLAN_META.starter.baseSeats
+                    : PLAN_META.growth.baseSeats}
                 </div>
 
                 <div className="text-primary-blue/80">Payment</div>
                 <div className="text-right text-primary-blue font-semibold">
-                  {paymentType || "—"}
+                  {paymentType}
                 </div>
 
                 <div className="text-primary-blue/80">Amount</div>
@@ -285,7 +453,10 @@ const SubscriptionPlan: React.FC = () => {
               <Button
                 text="Next Add Card Details"
                 onClick={handleContinue}
-                disabled={selectedPlanId === null || !paymentType}
+                disabled={
+                  selectedPlanId === null ||
+                  (selectedPlanId === 3 && (!customSeats || !customBilling))
+                }
               />
             </div>
           </div>
