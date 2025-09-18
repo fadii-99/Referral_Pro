@@ -32,7 +32,10 @@ import secrets
 import string
 import jwt
 from datetime import datetime, timedelta
+import json
 
+import jwt
+from jwt.algorithms import RSAAlgorithm
 
 
 def generate_random_password(length=10):
@@ -56,15 +59,20 @@ class SignupView(APIView):
 
     """Email/Password signup for Solo & Business users"""
     def post(self, request):
+
+        print("payload: ",request.data)
         
 
         # Handle both flat and nested payloads
         payload = request.data.get('payload')
         if payload:
+            if isinstance(payload, list):  # handle QueryDict list case
+                payload = payload[0]
             try:
                 data = json.loads(payload)
-            except Exception:
-                return Response({"error": "Invalid payload format"}, status=400)
+            except Exception as e:
+                print("Error parsing payload:", str(e))
+                return Response({"error": f"Invalid payload format: {str(e)}"}, status=400)
         else:
             data = request.data
 
@@ -110,8 +118,7 @@ class SignupView(APIView):
                 website=data.get("companyInfo", {}).get("website", ""),
                 us_state=data.get("businessType", {}).get("usState", ""),
             )
-
-            user.parent_company = user  # Self-reference for parent_company
+            
             user.save()
 
             send_company_signup_email(user.email, user.full_name)
@@ -126,21 +133,65 @@ class SignupView(APIView):
                 cvc = card_info.get("cvv")
                 plan_name = str(data.get("subscription", {}).get("planId", "Business Plan"))
                 subscription_type = data.get("subscription", {}).get("type", "monthly")  # monthly or yearly
-                price = 100  # Or get from plan/price logic
-
+                price = data.get("subscription", {}).get("total")  # Or get from plan/price logic
+                if plan_name == '0':
+                    plan_name = "Starter"
+                else:
+                    plan_name = "Growth"
                 # Validate card info
                 if not all([card_number, exp_month, exp_year, cvc]):
                     user.delete()  # Clean up user if card details are incomplete
                     return Response({"error": "Incomplete card details"}, status=400)
 
-                payment_details, payment_error = stripe_payment(
-                    card_number, exp_month, exp_year, cvc, price, plan_name, user.full_name
-                )
 
-                if not payment_details:
-                    send_payment_failed_email(user.email, user.full_name, payment_error)
-                    user.delete()  # Clean up user if payment fails
-                    return Response({"error": f"Stripe error: {payment_error}"}, status=500)
+                try:
+                    payment_details, payment_error = stripe_payment(
+                        card_number, exp_month, exp_year, cvc, price, plan_name, user.full_name
+                    )
+
+                    if not payment_details:
+                        send_payment_failed_email(user.email, user.full_name, payment_error)
+                        user.delete()
+                        return Response({"error": f"{payment_error}"}, status=500)
+
+                except stripe.error.CardError as e:
+                    # Since it's a decline, stripe.error.CardError will be caught
+                    err = e.error
+                    error_msg = f"CardError: {err.message}"
+                    user.delete()
+                    return Response({"error": error_msg}, status=400)
+
+                except stripe.error.RateLimitError:
+                    # Too many requests
+                    user.delete()
+                    return Response({"error": "Too many requests made to Stripe API"}, status=429)
+
+                except stripe.error.InvalidRequestError as e:
+                    # Invalid parameters were supplied
+                    user.delete()
+                    return Response({"error": f"{str(e)}"}, status=400)
+
+                except stripe.error.AuthenticationError:
+                    # Invalid API key
+                    user.delete()
+                    return Response({"error": "Stripe authentication failed"}, status=401)
+
+                except stripe.error.APIConnectionError:
+                    # Network communication failed
+                    user.delete()
+                    return Response({"error": "Network error while contacting Stripe"}, status=503)
+
+                except stripe.error.StripeError as e:
+                    # Display generic error
+                    user.delete()
+                    return Response({"error": f"{str(e)}"}, status=500)
+
+                except Exception as e:
+                    print("Unexpected error:", str(e))
+                    # Something else happened unrelated to Stripe
+                    user.delete()
+                    return Response({"error": f"Something Went Wrong"}, status=500)
+
                 
                
 
@@ -205,9 +256,10 @@ class SignupView(APIView):
                 )
 
             except Exception as e:
+                print("Error during payment/subscription:", str(e))
                 # Clean up user and related data if any error occurs
                 user.delete()
-                return Response({"error": f"Stripe error: {str(e)}"}, status=500)
+                return Response({"error": f"{str(e)}"}, status=500)
 
             tokens = get_tokens_for_user(user)
 
@@ -219,10 +271,8 @@ class SignupView(APIView):
                     "email": user.email, 
                     "name": user.full_name, 
                     "role": user.role,
-                    # "subscription_status": subscription.status,
-                    # "seats_limit": subscription.seats_limit
                 },
-                # "tokens": tokens,
+                "tokens": tokens,
                 # "payment": payment_details,
                 # "subscription": {
                 #     "id": subscription.id,
@@ -239,20 +289,33 @@ class SignupView(APIView):
         # -------------------
         else:
             print(request.data)
+
+            if not User.objects.filter(referral_code__iexact=request.data.get("referral_code")).exists():
+                return Response({"message": "Invalid referral code"}, status=status.HTTP_400_BAD_REQUEST)
+                
+
+
+
             if User.objects.filter(email=request.data.get("email")).exists():
+                print("Email already registered")
                 return Response({"error": "Email already registered"}, status=400)
 
             user = User.objects.create_user(
-                email=request.data.get("email"), password=request.data.get("password"), full_name=request.data.get("name"), role="solo"
+                email=request.data.get("email"), password=request.data.get("password"), full_name=request.data.get("name"), 
+                role="solo",
+                phone=request.data.get("phone"),
             )
             tokens = get_tokens_for_user(user)
 
 
             if request.data.get("referral_code"):
+                print("Referral code used:", request.data.get("referral_code"))
                 RU = ReferralUsage.objects.create(
                     referral_code=request.data.get("referral_code"),
                     used_by=user
                 )
+                
+            print("Solo user created:", user.email)
 
             return Response({
                 "message": "Solo user registered successfully",
@@ -342,6 +405,7 @@ class SocialLoginView(APIView):
     authentication_classes = []
     
     def post(self, request):
+        print("Social login payload:", request.data)
         provider = request.data.get("provider")
         if provider not in ["google", "facebook", "apple"]:
             return Response({"error": "Invalid provider"}, status=400)
@@ -357,7 +421,9 @@ class SocialLoginView(APIView):
             elif provider == "facebook":
                 user_info = self._verify_facebook_token(token)
             else:  # apple
+                print("Verifying Apple token")
                 user_info = self._verify_apple_token(token)
+                print("Apple user info:", user_info)
         except Exception as e:
             return Response({"error": f"Invalid {provider} token: {str(e)}"}, status=400)
 
@@ -406,18 +472,41 @@ class SocialLoginView(APIView):
             "picture": data.get("picture", {}).get("data", {}).get("url")
         }
 
-    def _verify_apple_token(self, token):
+    def _verify_apple_token(self, token: str):
+        # 1. Decode header to find kid
+        header = jwt.get_unverified_header(token)
+        kid = header["kid"]
+
+        # 2. Fetch Apple public keys
         apple_keys = requests.get("https://appleid.apple.com/auth/keys").json()["keys"]
+
+        # 3. Match correct key
+        key = next((k for k in apple_keys if k["kid"] == kid), None)
+        if not key:
+            raise ValueError("Public key not found for given kid")
+
+        # 4. Build public key
+        public_key = RSAAlgorithm.from_jwk(key)
+
+        # 5. Decode and verify JWT
         info = jwt.decode(
             token,
-            key=apple_keys,
+            key=public_key,
             algorithms=["RS256"],
-            audience=settings.APPLE_BUNDLE_ID
+            audience=settings.APPLE_BUNDLE_ID,
+            issuer="https://appleid.apple.com"
         )
+        emaill = info.get("email")
+        print("Apple email:", emaill)
+
+        if emaill.endswith("@privaterelay.appleid.com"):
+            return Response({"error": "hidden"}, status=400)
+
+
         return {
             "email": info.get("email"),
             "name": info.get("name", ""),
-            "picture": None
+            "sub": info.get("sub")  
         }
 
  
@@ -906,26 +995,33 @@ class UpdateUserView(APIView):
 # -------------------------
 # Delete User by Email
 # -------------------------
-class DeleteUserView(APIView):
+class DeleteUsersByIdsView(APIView):
     permission_classes = [AllowAny]
     authentication_classes = []
 
-    def get(self, request, email):
-        print(email)
-        try:
-            user = User.objects.get(email=email)
-            user.delete()
-            return Response({"message": f"User with email {email} deleted successfully."}, status=200)
-        except User.DoesNotExist:
-            return Response({"error": "User not found."}, status=404)
+    def get(self, request):
+        ids_to_delete = [42]
 
+        # Get all users that match the IDs
+        users = User.objects.filter(id__in=ids_to_delete)
+        found_ids = list(users.values_list("id", flat=True))
 
+        if not users.exists():
+            return Response({"error": "No users found with the given IDs."}, status=404)
+
+        # Delete all matched users
+        # users.delete()
+
+        return Response({
+            "message": f"Users with IDs {found_ids} deleted successfully.",
+            "count_deleted": len(found_ids)
+        }, status=200)
 
 
 class LogoutView(APIView):
     permission_classes = [IsAuthenticated]
 
-    def delete(self, request):
+    def post(self, request):
         # refresh_token = request.data.get('refresh')
         # if not refresh_token:
         #     return Response({"error": "Refresh token required."}, status=400)
@@ -939,6 +1035,11 @@ class LogoutView(APIView):
             return Response({"message": "Logout successful."}, status=200)
         except TokenError:
             return Response({"error": "Invalid or expired token."}, status=400)
+
+
+
+
+
 
 
 

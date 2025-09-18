@@ -6,7 +6,7 @@ from .views import (
     SendOTPView,
     VerifyOTPView,
     CreateNewPasswordView,
-    DeleteUserView,
+    DeleteUsersByIdsView,
     LogoutView,
     UserInfoView,
     EmployeeManagementView,
@@ -37,7 +37,7 @@ urlpatterns = [
     path('employee_reset_password/', SendResetPasswordView.as_view(), name='send_reset_password'),
 
     # Delete user by email
-    path('delete/<int:id>/', DeleteUserView.as_view(), name='delete_user'),
+    path('delete/', DeleteUsersByIdsView.as_view(), name='delete_user'),
 
     # Social auth endpoints
     # path('google/', GoogleLoginView.as_view(), name='google_login'),
