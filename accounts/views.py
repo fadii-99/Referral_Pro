@@ -136,8 +136,10 @@ class SignupView(APIView):
                 price = data.get("subscription", {}).get("total")  # Or get from plan/price logic
                 if plan_name == '0':
                     plan_name = "Starter"
-                else:
+                elif plan_name == '1':
                     plan_name = "Growth"
+                else:
+                    plan_name = "Custom"
                 # Validate card info
                 if not all([card_number, exp_month, exp_year, cvc]):
                     user.delete()  # Clean up user if card details are incomplete
@@ -423,6 +425,8 @@ class SocialLoginView(APIView):
             else:  # apple
                 print("Verifying Apple token")
                 user_info = self._verify_apple_token(token)
+                if user_info.get("is_relay"):
+                    return Response({"error": "hidden"}, status=400)
                 print("Apple user info:", user_info)
         except Exception as e:
             return Response({"error": f"Invalid {provider} token: {str(e)}"}, status=400)
@@ -496,17 +500,20 @@ class SocialLoginView(APIView):
             audience=settings.APPLE_BUNDLE_ID,
             issuer="https://appleid.apple.com"
         )
+        print("\nApple token info:", info)
         emaill = info.get("email")
-        print("Apple email:", emaill)
+        print("\nApple email:", emaill)
+
+        is_relay = False
 
         if emaill.endswith("@privaterelay.appleid.com"):
-            return Response({"error": "hidden"}, status=400)
+            is_relay = True
 
 
         return {
             "email": info.get("email"),
             "name": info.get("name", ""),
-            "sub": info.get("sub")  
+            "sub": info.get("sub") ,"is_relay": is_relay 
         }
 
  
