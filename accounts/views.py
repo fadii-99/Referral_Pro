@@ -292,8 +292,10 @@ class SignupView(APIView):
         else:
             print(request.data)
 
-            if not User.objects.filter(referral_code__iexact=request.data.get("referral_code")).exists():
-                return Response({"message": "Invalid referral code"}, status=status.HTTP_400_BAD_REQUEST)
+            if request.data.get("referral_code"):
+
+                if not User.objects.filter(referral_code__iexact=request.data.get("referral_code")).exists():
+                    return Response({"message": "Invalid referral code"}, status=status.HTTP_400_BAD_REQUEST)
                 
 
 
@@ -440,6 +442,10 @@ class SocialLoginView(APIView):
         )
        
 
+        if user_info.get("name") and not user.full_name:
+            user.full_name = user_info["name"]
+            user.save()
+
         if user_info.get("picture") and not user.image:
             user.image = user_info["picture"]
             user.save()
@@ -451,11 +457,15 @@ class SocialLoginView(APIView):
 
     def _verify_google_token(self, token):
         info = id_token.verify_oauth2_token(token, google_requests.Request())
+
+        print("\nGoogle token info:", info)
         
         # Get user email from token info
         email = info.get("email")
         if not email:
             raise Exception("Email not found in Google token")
+
+
 
         
         return {
