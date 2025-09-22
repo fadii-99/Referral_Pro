@@ -17,6 +17,7 @@ const SubscriptionPlan = lazy(() => import("./../pages/SubscriptionPlan"));
 const PaymentMethod = lazy(() => import("./../pages/PaymentMethod"));
 const PasswordCreation = lazy(() => import("./../pages/PasswordCreation"));
 
+
 // Dashboard
 import DashboardParent from "./DashboardParent";
 const Dashboard = lazy(() => import("./../pages/Dashboard"));
@@ -26,6 +27,18 @@ const Referral = lazy(() => import("./../pages/Referral"));
 const ReferralDetail = lazy(() => import("./../pages/ReferralDetail"));
 const Notifications = lazy(() => import("./../pages/Notifications.tsx"));
 const Profile = lazy(() => import("./../pages/Profile.tsx"));
+
+
+// Admin
+// import AdminParent from "./AdminParent.tsx";
+// const AdminDashboard= lazy(() => import("./../adminPages/AdminDashboard.tsx"));
+// const AdminFinancial = lazy(() => import("./../adminPages/AdminFinancial.tsx"));
+// const AdminUsers = lazy(() => import("./../adminPages/AdminUsers.tsx")); // 👈 NEW
+// const AdminCompany = lazy(() => import("./../adminPages/AdminCompany.tsx")); // 👈 NEW
+// const AdminTickets = lazy(() => import("./../adminPages/AdminTickets.tsx")); // 👈 NEW
+
+
+
 
 const router = createBrowserRouter([
   // Public Routes
@@ -202,6 +215,61 @@ const router = createBrowserRouter([
       },
     ],
   },
+
+  // 🔒 Admin Dashboard Routes
+// {
+//   path: "/Admin",
+//   element: (
+//     <Suspense fallback={<Loader />}>
+//       <AdminParent />
+//     </Suspense>
+//   ),
+//   children: [
+//     {
+//       index: true,
+//       element: (
+//         <Suspense fallback={<Loader />}>
+//           <AdminDashboard />
+//         </Suspense>
+//       ),
+//     }
+//     ,
+//       {
+//       path: "Financial",
+//       element: (
+//         <Suspense fallback={<Loader />}>
+//           <AdminFinancial />
+//         </Suspense>
+//       ),
+//     }
+//     ,
+//     {
+//       path: "Users",
+//       element: (
+//         <Suspense fallback={<Loader />}>
+//           <AdminUsers />
+//         </Suspense>
+//       ),
+//     }
+//     ,
+//       {
+//         path: "Company",
+//         element: (
+//           <Suspense fallback={<Loader />}>
+//             <AdminCompany />
+//           </Suspense>
+//         ),
+//       },
+//       {
+//         path: "Tickets",
+//         element: (
+//           <Suspense fallback={<Loader />}>
+//             <AdminTickets />
+//           </Suspense>
+//         ),
+//       },
+//   ],
+// },
 ]);
 
 export default router;

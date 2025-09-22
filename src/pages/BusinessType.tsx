@@ -48,19 +48,18 @@ const BusinessType: React.FC = () => {
 
   const [loading] = useState(false);
 
-   useEffect(() => {
+  useEffect(() => {
     if (isContractor) {
       // Contractor → hamesha sole lock
       setType("sole");
-      setRegistrationData((prev) => ({ ...prev, bizType: "sole" }));
+      setEmployees(""); // reset employees if contractor
+      setRegistrationData((prev) => ({ ...prev, bizType: "sole", employees: "" }));
     } else {
-      // Company → agar pehle se koi type set hai to use karo
       if (registrationData.bizType) {
         setType(registrationData.bizType);
       }
     }
 
-    // Sync other fields always
     setYears(registrationData.years);
     setEmployees(registrationData.employees);
     setUsState(registrationData.usState);
@@ -70,10 +69,10 @@ const BusinessType: React.FC = () => {
 
   const handleContinue: React.MouseEventHandler<HTMLButtonElement> = () => {
     if (!type && !isContractor) {
-    toast.error("Please select a business type.");
-    return;
-  }
-    if (!years.trim() || !employees.trim()) {
+      toast.error("Please select a business type.");
+      return;
+    }
+    if (!years.trim() || (!employees.trim() && type !== "sole")) {
       toast.error("Please fill out all fields.");
       return;
     }
@@ -84,7 +83,7 @@ const BusinessType: React.FC = () => {
       ...prev,
       bizType: nextType,
       years: years.trim(),
-      employees: employees.trim(),
+      employees: type === "sole" ? "" : employees.trim(),
       usState: usState?.trim() || "",
     }));
 
@@ -93,12 +92,20 @@ const BusinessType: React.FC = () => {
 
   const TypeCard: React.FC<{ value: BizType; label: string }> = ({ value, label }) => {
     const active = type === value;
-    const disabled = isContractor; // lock for contractor
+    const disabled = isContractor;
 
     return (
       <button
         type="button"
-        onClick={() => !disabled && setType(value)}
+        onClick={() => {
+          if (!disabled) {
+            setType(value);
+            if (value === "sole") {
+              setEmployees(""); // reset employees on sole selection
+              setRegistrationData((prev) => ({ ...prev, employees: "" }));
+            }
+          }
+        }}
         className={`relative w-full rounded-3xl sm:p-6 p-3 text-left bg-white border
                     shadow-[0_6px_24px_rgba(0,0,0,0.06)] transition
                     hover:shadow-[0_8px_28px_rgba(0,0,0,0.10)]
@@ -279,64 +286,66 @@ const BusinessType: React.FC = () => {
               </div>
             </div>
 
-            {/* Employees */}
-            <div className="mt-4">
-              <label className="block text-[11px] text-primary-blue font-semibold mb-1.5">
-                Employee Count
-              </label>
-              <div className="relative">
-                <span className="absolute left-4 top-1/2 -translate-y-1/2 pointer-events-none">
-                  <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-primary-purple/80" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6">
-                    <path d="M16 11a3 3 0 100-6 3 3 0 000 6Z" />
-                    <path d="M8 13a3 3 0 100-6 3 3 0 000 6Z" />
-                    <path d="M2 20a6 6 0 0112 0M10 20a6 6 0 0112 0" />
-                  </svg>
-                </span>
+            {/* Employees → Hide if Sole Proprietorship or Contractor */}
+            {type !== "sole" && !isContractor && (
+              <div className="mt-4">
+                <label className="block text-[11px] text-primary-blue font-semibold mb-1.5">
+                  Employee Count
+                </label>
+                <div className="relative">
+                  <span className="absolute left-4 top-1/2 -translate-y-1/2 pointer-events-none">
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-primary-purple/80" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6">
+                      <path d="M16 11a3 3 0 100-6 3 3 0 000 6Z" />
+                      <path d="M8 13a3 3 0 100-6 3 3 0 000 6Z" />
+                      <path d="M2 20a6 6 0 0112 0M10 20a6 6 0 0112 0" />
+                    </svg>
+                  </span>
 
-                <button
-                  type="button"
-                  onClick={() => {
-                    setOpenEmp((s) => !s);
-                    setOpenYears(false);
-                    setOpenState(false);
-                  }}
-                  className="w-full pl-12 pr-10 py-4 rounded-full bg-white border border-gray-200 text-left
-                             text-xs md:text-sm text-gray-800 outline-none"
-                >
-                  {employees || "Select Employee Count"}
-                </button>
-
-                <span className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none">
-                  <svg xmlns="http://www.w3.org/2000/svg" className={`h-4 w-4 transition-transform ${openEmp ? "rotate-180" : ""}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <path d="M6 9l6 6 6-6" strokeLinecap="round" strokeLinejoin="round" />
-                  </svg>
-                </span>
-
-                {openEmp && (
-                  <ul
-                    className="absolute z-40 mt-2 w-full bg-white border border-gray-200 rounded-2xl shadow-lg
-                              overflow-auto max-h-24 sm:max-h-40 text-[11px] sm:text-sm"
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setOpenEmp((s) => !s);
+                      setOpenYears(false);
+                      setOpenState(false);
+                    }}
+                    className="w-full pl-12 pr-10 py-4 rounded-full bg-white border border-gray-200 text-left
+                               text-xs md:text-sm text-gray-800 outline-none"
                   >
-                    {EMPLOYEE_OPTIONS.map((opt) => (
-                      <li key={opt}>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setEmployees(opt);
-                            setOpenEmp(false);
-                          }}
-                          className="w-full text-left px-3 py-1.5 sm:px-4 sm:py-2 hover:bg-primary-purple/5"
-                          aria-selected={employees === opt}
-                        >
-                          {opt}
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                )}
+                    {employees || "Select Employee Count"}
+                  </button>
 
+                  <span className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none">
+                    <svg xmlns="http://www.w3.org/2000/svg" className={`h-4 w-4 transition-transform ${openEmp ? "rotate-180" : ""}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M6 9l6 6 6-6" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                  </span>
+
+                  {openEmp && (
+                    <ul
+                      className="absolute z-40 mt-2 w-full bg-white border border-gray-200 rounded-2xl shadow-lg
+                                overflow-auto max-h-32 sm:max-h-32 text-[11px] sm:text-sm"
+                    >
+                      {EMPLOYEE_OPTIONS.map((opt) => (
+                        <li key={opt}>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setEmployees(opt);
+                              setOpenEmp(false);
+                            }}
+                            className="w-full text-left px-3 py-1.5 sm:px-4 sm:py-2 hover:bg-primary-purple/5"
+                            aria-selected={employees === opt}
+                          >
+                            {opt}
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+
+                </div>
               </div>
-            </div>
+            )}
 
             <Button
               text={loading ? "Saving..." : "Next Company Information"}

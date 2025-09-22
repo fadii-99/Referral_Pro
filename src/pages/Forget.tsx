@@ -77,7 +77,6 @@ const Forget: React.FC = () => {
       return;
     }
 
-    console.groupCollapsed("✅ send_otp success");
     console.log(typeof data === "string" ? data : JSON.stringify(data, null, 2));
     console.groupEnd();
 

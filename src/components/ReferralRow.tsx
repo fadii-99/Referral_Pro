@@ -96,8 +96,8 @@ const ReferralRow: React.FC<{
         {referral.assigned_to_name ? (
           <span className="text-gray-700">{referral.assigned_to_name}</span>
         ) : (
-          <span className="inline-flex items-center w-fit px-3 py-1 rounded-lg text-xs font-medium text-red-600 bg-red-50">
-            null
+          <span className="inline-flex items-center w-fit px-3 py-1 rounded-lg md:text-sm text-xs font-medium text-red-600 bg-red-50">
+            none
           </span>
         )}
       </div>

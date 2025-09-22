@@ -44,9 +44,21 @@ const Welcome: React.FC = () => {
         aria-pressed={active}
       >
         <div className="flex items-center justify-center rounded-xl bg-primary-purple/10 w-10 h-10 shrink-0">
-          <img src={companyLogo} alt="" className="w-5 h-5 object-contain" />
-        </div>
-
+            {id === "company" ? (
+              <img src={companyLogo} alt="" className="w-5 h-5 object-contain" />
+            ) : (
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                className="w-5 h-5 text-primary-purple"
+                viewBox="0 0 24 24"
+                fill="currentColor"
+              >
+                <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 
+                        1.79-4 4 1.79 4 4 4zm0 2c-3.33 0-6 1.34-6 
+                        3v1h12v-1c0-1.66-2.67-3-6-3z" />
+              </svg>
+            )}
+          </div>
         <div className="flex-1">
           <div className="font-semibold text-primary-blue leading-tight sm:text-2xl text-lg">
             {title}
