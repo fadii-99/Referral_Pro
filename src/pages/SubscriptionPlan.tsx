@@ -8,25 +8,60 @@ import { RegistrationContext } from "../context/RegistrationProvider";
 type Billing = "monthly" | "yearly" | "";
 type PlanKey = "starter" | "growth" | "custom";
 
-const PLAN_ORDER: Record<Exclude<PlanKey, "custom">, 0 | 1> = { starter: 0, growth: 1 };
+const PLAN_ORDER: Record<Exclude<PlanKey, "custom">, 0 | 1> = {
+  starter: 0,
+  growth: 1,
+};
 
 const PLAN_META = {
-  starter: { name: "Starter", seatsLabel: "5 seats", baseSeats: 5, monthlyPrice: 99 },
-  growth: { name: "Growth", seatsLabel: "25 seats", baseSeats: 25, monthlyPrice: 299 },
+  starter: {
+    name: "Starter",
+    seatsLabel: "5 seats",
+    baseSeats: 5,
+    monthlyPrice: 99,
+  },
+  growth: {
+    name: "Growth",
+    seatsLabel: "25 seats",
+    baseSeats: 25,
+    monthlyPrice: 299,
+  },
 };
 
 const money = (n: number) => `$${Math.round(n).toLocaleString()}`;
-const yearlyWithDiscount = (monthlyTotal: number) => Math.round(monthlyTotal * 12 * 0.9);
+const yearlyWithDiscount = (monthlyTotal: number) =>
+  Math.round(monthlyTotal * 12 * 0.9);
 
-function computeTotals(plan: PlanKey, mode: Billing, customSeats?: number) {
+function computeTotals(
+  plan: PlanKey,
+  mode: Billing,
+  customSeats?: number,
+  isContractor = false
+) {
   if (plan === "custom") {
     const perSeat = 20;
     const monthlyTotal = (customSeats || 5) * perSeat;
     const total =
-      mode === "monthly" ? monthlyTotal : mode === "yearly" ? monthlyTotal * 12 : 0;
+      mode === "monthly"
+        ? monthlyTotal
+        : mode === "yearly"
+        ? monthlyTotal * 12
+        : 0;
     return {
       total,
-      display: total ? `${money(total)}${mode === "monthly" ? "/mon" : "/yr"}` : "—",
+      display: total
+        ? `${money(total)}${mode === "monthly" ? "/mon" : "/yr"}`
+        : "—",
+      currency: "USD" as const,
+    };
+  }
+
+  // Contractor override → Starter = 1 seat, $20/month
+  if (isContractor && plan === "starter") {
+    const total = mode === "monthly" ? 20 : 240;
+    return {
+      total,
+      display: mode === "monthly" ? "$20/mon" : "$240/yr",
       currency: "USD" as const,
     };
   }
@@ -42,7 +77,9 @@ function computeTotals(plan: PlanKey, mode: Billing, customSeats?: number) {
       : 0;
   return {
     total,
-    display: total ? `${money(total)}${mode === "monthly" ? "/mon" : "/yr"}` : "—",
+    display: total
+      ? `${money(total)}${mode === "monthly" ? "/mon" : "/yr"}`
+      : "—",
     currency: "USD" as const,
   };
 }
@@ -50,8 +87,11 @@ function computeTotals(plan: PlanKey, mode: Billing, customSeats?: number) {
 const SubscriptionPlan: React.FC = () => {
   const navigate = useNavigate();
   const ctx = useContext(RegistrationContext);
-  if (!ctx) throw new Error("SubscriptionPlan must be used within RegistrationProvider");
+  if (!ctx)
+    throw new Error("SubscriptionPlan must be used within RegistrationProvider");
   const { registrationData, setRegistrationData } = ctx;
+
+  const isContractor = registrationData.profileType === "contractor";
 
   const [billing, setBilling] = useState<Billing>(
     (registrationData.subscriptionBilling as Billing) || "monthly"
@@ -61,7 +101,7 @@ const SubscriptionPlan: React.FC = () => {
     registrationData.subscriptionPlanId
   );
 
-  const [paymentType] = useState<"stripe">("stripe"); // Stripe only
+  const [paymentType] = useState<"stripe">("stripe");
 
   // 🔽 Custom plan state
   const [customSeats, setCustomSeats] = useState<number>(
@@ -75,44 +115,26 @@ const SubscriptionPlan: React.FC = () => {
       : ""
   );
 
-  // Starter/Growth billing
   const handleBillingSwitch = (mode: Billing) => {
-    // agar custom select hai aur top tab dabaya → default Starter pe switch
-    if (selectedPlanId === null || selectedPlanId === 3) {
-      setSelectedPlanId(0); // default Starter
-      setBilling(mode);
-      const totals = computeTotals("starter", mode);
-      setRegistrationData((prev) => ({
-        ...prev,
-        subscriptionBilling: mode,
-        subscriptionPlanId: 0,
-        subscriptionSeats: PLAN_META.starter.baseSeats,
-        subscriptionCurrency: totals.currency,
-        subscriptionTotal: totals.total,
-        subscriptionTotalDisplay: totals.display,
-      }));
-      return;
-    }
-
-    // agar Starter/Growth hai
     setBilling(mode);
-    const planKey: PlanKey = selectedPlanId === 0 ? "starter" : "growth";
-    const totals = computeTotals(planKey, mode);
+    if (selectedPlanId === null || selectedPlanId === 3) {
+      setSelectedPlanId(0);
+    }
+    const planKey: PlanKey = selectedPlanId === 1 ? "growth" : "starter";
+    const totals = computeTotals(planKey, mode, customSeats, isContractor);
     setRegistrationData((prev) => ({
       ...prev,
       subscriptionBilling: mode,
-      subscriptionPlanId: selectedPlanId,
-      subscriptionSeats:
-        selectedPlanId === 0
-          ? PLAN_META.starter.baseSeats
-          : PLAN_META.growth.baseSeats,
+      subscriptionPlanId: selectedPlanId === 1 ? 1 : 0,
+      subscriptionSeats: isContractor && planKey === "starter"
+        ? 1
+        : PLAN_META[planKey].baseSeats,
       subscriptionCurrency: totals.currency,
       subscriptionTotal: totals.total,
       subscriptionTotalDisplay: totals.display,
     }));
   };
 
-  // Custom billing select
   const handleCustomBillingSelect = (mode: Billing) => {
     setCustomBilling(mode);
     const totals = computeTotals("custom", mode, customSeats);
@@ -144,15 +166,16 @@ const SubscriptionPlan: React.FC = () => {
     }
 
     const planId = PLAN_ORDER[plan];
-    const seats = PLAN_META[plan].baseSeats;
-    const totals = computeTotals(plan, billing);
+    const totals = computeTotals(plan, billing, customSeats, isContractor);
     setSelectedPlanId(planId);
-
     setRegistrationData((prev) => ({
       ...prev,
       subscriptionBilling: billing,
       subscriptionPlanId: planId,
-      subscriptionSeats: seats,
+      subscriptionSeats:
+        isContractor && plan === "starter"
+          ? 1
+          : PLAN_META[plan].baseSeats,
       subscriptionCurrency: totals.currency,
       subscriptionTotal: totals.total,
       subscriptionTotalDisplay: totals.display,
@@ -167,9 +190,12 @@ const SubscriptionPlan: React.FC = () => {
 
   const PlanCard: React.FC<{ id: "starter" | "growth" }> = ({ id }) => {
     const meta = PLAN_META[id];
-    const totals = computeTotals(id, billing);
+    const totals = computeTotals(id, billing, customSeats, isContractor);
     const planId = PLAN_ORDER[id];
     const selected = selectedPlanId === planId;
+
+    const seatsLabel =
+      isContractor && id === "starter" ? "1 seat" : meta.seatsLabel;
 
     return (
       <button
@@ -186,7 +212,7 @@ const SubscriptionPlan: React.FC = () => {
         <div className="flex items-start justify-between">
           <div>
             <div className="text-sm font-semibold opacity-90">{meta.name}</div>
-            <div className="mt-1 text-[11px] opacity-70">{meta.seatsLabel}</div>
+            <div className="mt-1 text-[11px] opacity-70">{seatsLabel}</div>
           </div>
           <div
             className={[
@@ -201,7 +227,7 @@ const SubscriptionPlan: React.FC = () => {
 
         <div className="mt-4">
           <span className="text-3xl font-bold tracking-tight">
-            {money(totals.total)}
+            {totals.display.split("/")[0]}
           </span>
           <span className="ml-1 text-sm opacity-80">
             {billing === "monthly" ? "/mon" : "/yr"}
@@ -209,41 +235,11 @@ const SubscriptionPlan: React.FC = () => {
         </div>
 
         <div className="mt-2 text-xs opacity-70">
-          {billing === "yearly"
+          {isContractor && id === "starter"
+            ? "Single seat plan for contractors"
+            : billing === "yearly"
             ? "10% off with annual prepayment"
             : `~${money(Math.ceil(meta.monthlyPrice / meta.baseSeats))}/seat baseline`}
-        </div>
-      </button>
-    );
-  };
-
-  const PaymentCard: React.FC<{
-    type: Billing;
-    label: string;
-    selected: boolean;
-    onClick: () => void;
-  }> = ({ label, selected, onClick }) => {
-    return (
-      <button
-        type="button"
-        onClick={onClick}
-        className={[
-          "w-full rounded-xl sm:px-4 px-3 py-3 border text-left transition-all",
-          selected
-            ? "bg-white border-primary-purple ring-2 ring-primary-purple/30"
-            : "bg-white border-primary-blue/20 hover:shadow-sm",
-        ].join(" ")}
-      >
-        <div className="flex items-center justify-between">
-          <div className="sm:text-sm text-xs font-semibold text-primary-blue">{label}</div>
-          <div
-            className={[
-              "w-5 h-5 rounded-full border flex items-center justify-center",
-              selected ? "border-primary-purple" : "border-primary-blue/30",
-            ].join(" ")}
-          >
-            {selected ? <span className="w-2.5 h-2.5 rounded-full bg-primary-purple" /> : null}
-          </div>
         </div>
       </button>
     );
@@ -356,38 +352,54 @@ const SubscriptionPlan: React.FC = () => {
                   </span>
                 </div>
 
-                {/* Duration cards */}
                 <div className="mt-4">
                   <div className="text-xs text-primary-blue font-semibold mb-2">
                     Duration
                   </div>
                   <div className="grid grid-cols-2 gap-3">
-                    <PaymentCard
-                      type="monthly"
-                      label="Monthly"
-                      selected={customBilling === "monthly"}
+                    <button
+                      type="button"
                       onClick={() => handleCustomBillingSelect("monthly")}
-                    />
-                    <PaymentCard
-                      type="yearly"
-                      label="Yearly"
-                      selected={customBilling === "yearly"}
+                      className={`w-full rounded-xl sm:px-4 px-3 py-3 border text-left transition-all ${
+                        customBilling === "monthly"
+                          ? "bg-white border-primary-purple ring-2 ring-primary-purple/30"
+                          : "bg-white border-primary-blue/20 hover:shadow-sm"
+                      }`}
+                    >
+                      Monthly
+                    </button>
+                    <button
+                      type="button"
                       onClick={() => handleCustomBillingSelect("yearly")}
-                    />
+                      className={`w-full rounded-xl sm:px-4 px-3 py-3 border text-left transition-all ${
+                        customBilling === "yearly"
+                          ? "bg-white border-primary-purple ring-2 ring-primary-purple/30"
+                          : "bg-white border-primary-blue/20 hover:shadow-sm"
+                      }`}
+                    >
+                      Yearly
+                    </button>
                   </div>
                 </div>
               </div>
             )}
 
             {/* Starter/Growth plans */}
-            {selectedPlanId !== 3 && (
-              <div className="grid grid-cols-2 gap-4">
-                <PlanCard id="starter" />
-                <PlanCard id="growth" />
-              </div>
-            )}
+{selectedPlanId !== 3 && (
+  <div className="grid grid-cols-2 gap-4">
+    {isContractor ? (
+      <PlanCard id="starter" />  
+    ) : (
+      <>
+        <PlanCard id="starter" />
+        <PlanCard id="growth" />
+      </>
+    )}
+  </div>
+)}
 
-            {/* Payment type (always stripe card visible) */}
+
+            {/* Payment type */}
             <div className="mt-6">
               <div className="text-xs text-primary-blue font-semibold mb-2">
                 Payment method
@@ -433,7 +445,9 @@ const SubscriptionPlan: React.FC = () => {
                     : selectedPlanId === null
                     ? "—"
                     : selectedPlanId === 0
-                    ? PLAN_META.starter.baseSeats
+                    ? isContractor
+                      ? "1"
+                      : PLAN_META.starter.baseSeats
                     : PLAN_META.growth.baseSeats}
                 </div>
 
@@ -451,7 +465,7 @@ const SubscriptionPlan: React.FC = () => {
 
             <div className="mt-6">
               <Button
-                text="Next Add Card Details"
+                text="Next : Add Card Details"
                 onClick={handleContinue}
                 disabled={
                   selectedPlanId === null ||

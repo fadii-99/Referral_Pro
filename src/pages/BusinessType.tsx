@@ -9,6 +9,8 @@ import "react-toastify/dist/ReactToastify.css";
 
 import { RegistrationContext, type BizType } from "./../context/RegistrationProvider";
 
+
+
 const YEARS_OPTIONS = [
   "Less than 1 year",
   "1 – 2 years",
@@ -52,8 +54,7 @@ const BusinessType: React.FC = () => {
     if (isContractor) {
       // Contractor → hamesha sole lock
       setType("sole");
-      setEmployees(""); // reset employees if contractor
-      setRegistrationData((prev) => ({ ...prev, bizType: "sole", employees: "" }));
+      setRegistrationData((prev) => ({ ...prev, bizType: "sole" }));
     } else {
       if (registrationData.bizType) {
         setType(registrationData.bizType);
@@ -67,28 +68,43 @@ const BusinessType: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const handleContinue: React.MouseEventHandler<HTMLButtonElement> = () => {
-    if (!type && !isContractor) {
-      toast.error("Please select a business type.");
-      return;
-    }
-    if (!years.trim() || (!employees.trim() && type !== "sole")) {
-      toast.error("Please fill out all fields.");
-      return;
-    }
+ const handleContinue: React.MouseEventHandler<HTMLButtonElement> = () => {
+  if (!type && !isContractor) {
+    toast.error("Please select a business type.");
+    return;
+  }
 
-    const nextType: BizType = isContractor ? "sole" : type;
+  if (!usState.trim()) {
+    toast.error("Please select a state.");
+    return;
+  }
 
-    setRegistrationData((prev) => ({
-      ...prev,
-      bizType: nextType,
-      years: years.trim(),
-      employees: type === "sole" ? "" : employees.trim(),
-      usState: usState?.trim() || "",
-    }));
+  if (!years.trim()) {
+    toast.error("Please select years in business.");
+    return;
+  }
 
-    navigate("/CompanyInformation");
-  };
+  if (!isContractor && !employees.trim()) {
+    toast.error("Please select employee count.");
+    return;
+  }
+
+  const nextType: BizType = isContractor ? "sole" : type;
+
+  setRegistrationData((prev) => ({
+    ...prev,
+    bizType: nextType,
+    years: years.trim(),
+    employees: isContractor ? "" : employees.trim(),
+    usState: usState?.trim() || "",
+  }));
+
+
+  navigate("/CompanyInformation");
+};
+
+
+
 
   const TypeCard: React.FC<{ value: BizType; label: string }> = ({ value, label }) => {
     const active = type === value;
@@ -101,7 +117,6 @@ const BusinessType: React.FC = () => {
           if (!disabled) {
             setType(value);
             if (value === "sole") {
-              setEmployees(""); // reset employees on sole selection
               setRegistrationData((prev) => ({ ...prev, employees: "" }));
             }
           }
@@ -151,31 +166,29 @@ const BusinessType: React.FC = () => {
         <div className="flex-1 flex items-center justify-center px-4 sm:mt-0 mt-4">
           <div className="w-full max-w-lg">
             {/* Type Grid / Read-only */}
-            <div className="mb-4">
-              <label className="block text-[11px] text-primary-blue font-semibold mb-2">
-                Type
-              </label>
+           <div className="mb-4">
+                {isContractor ? null : (
+                  <div>
+                     <label className="block text-[11px] text-primary-blue font-semibold mb-2">
+                         Type <span className="text-rose-500">*</span>
+                      </label>
+                  <div className="grid grid-cols-2 md:grid-cols-3 gap-3 md:gap-4">
+                    <TypeCard value="sole"         label="Sole Proprietorship" />
+                    <TypeCard value="partnership"  label="Partnership" />
+                    <TypeCard value="nonprofit"    label="Non-profit" />
+                    <TypeCard value="corporation"  label="Corporation" />
+                    <TypeCard value="llc"          label="LLC" />
+                    <TypeCard value="other"        label="Other" />
+                  </div>
+                </div>
+                )}
+              </div>
 
-              {isContractor ? (
-                <div className="w-full rounded-3xl bg-white border border-gray-200 px-4 py-3 flex items-center justify-between">
-                  <span className="text-xs sm:text-sm text-gray-800">Sole Proprietorship</span>
-                </div>
-              ) : (
-                <div className="grid grid-cols-2 md:grid-cols-3 gap-3 md:gap-4">
-                  <TypeCard value="sole"         label="Sole Proprietorship" />
-                  <TypeCard value="partnership"  label="Partnership" />
-                  <TypeCard value="nonprofit"    label="Non-profit" />
-                  <TypeCard value="corporation"  label="Corporation" />
-                  <TypeCard value="llc"          label="LLC" />
-                  <TypeCard value="other"        label="Other" />
-                </div>
-              )}
-            </div>
 
             {/* State */}
             <div className="mt-4">
               <label className="block text-[11px] text-primary-blue font-semibold mb-1.5">
-                State
+                State <span className="text-rose-500">*</span>
               </label>
               <div className="relative">
                 <span className="absolute left-4 top-1/2 -translate-y-1/2 pointer-events-none">
@@ -233,7 +246,7 @@ const BusinessType: React.FC = () => {
             {/* Years */}
             <div className="mt-6">
               <label className="block text-[11px] text-primary-blue font-semibold mb-1.5">
-                Years in Business
+                Years in Business <span className="text-rose-500">*</span>
               </label>
               <div className="relative">
                 <span className="absolute left-4 top-1/2 -translate-y-1/2 pointer-events-none">
@@ -286,69 +299,71 @@ const BusinessType: React.FC = () => {
               </div>
             </div>
 
-            {/* Employees → Hide if Sole Proprietorship or Contractor */}
-            {type !== "sole" && !isContractor && (
-              <div className="mt-4">
-                <label className="block text-[11px] text-primary-blue font-semibold mb-1.5">
-                  Employee Count
-                </label>
-                <div className="relative">
-                  <span className="absolute left-4 top-1/2 -translate-y-1/2 pointer-events-none">
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-primary-purple/80" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6">
-                      <path d="M16 11a3 3 0 100-6 3 3 0 000 6Z" />
-                      <path d="M8 13a3 3 0 100-6 3 3 0 000 6Z" />
-                      <path d="M2 20a6 6 0 0112 0M10 20a6 6 0 0112 0" />
-                    </svg>
-                  </span>
+            
+             {/* Employee Count */}
+{!isContractor && (
+  <div className="mt-4">
+    <label className="block text-[11px] text-primary-blue font-semibold mb-1.5">
+      Employee Count <span className="text-rose-500">*</span>
+    </label>
+    <div className="relative">
+      <span className="absolute left-4 top-1/2 -translate-y-1/2 pointer-events-none">
+        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-primary-purple/80" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6">
+          <path d="M16 11a3 3 0 100-6 3 3 0 000 6Z" />
+          <path d="M8 13a3 3 0 100-6 3 3 0 000 6Z" />
+          <path d="M2 20a6 6 0 0112 0M10 20a6 6 0 0112 0" />
+        </svg>
+      </span>
 
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setOpenEmp((s) => !s);
-                      setOpenYears(false);
-                      setOpenState(false);
-                    }}
-                    className="w-full pl-12 pr-10 py-4 rounded-full bg-white border border-gray-200 text-left
-                               text-xs md:text-sm text-gray-800 outline-none"
-                  >
-                    {employees || "Select Employee Count"}
-                  </button>
+      <button
+        type="button"
+        onClick={() => {
+          setOpenEmp((s) => !s);
+          setOpenYears(false);
+          setOpenState(false);
+        }}
+        className="w-full pl-12 pr-10 py-4 rounded-full bg-white border border-gray-200 text-left
+                   text-xs md:text-sm text-gray-800 outline-none"
+      >
+        {employees || "Select Employee Count"}
+      </button>
 
-                  <span className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none">
-                    <svg xmlns="http://www.w3.org/2000/svg" className={`h-4 w-4 transition-transform ${openEmp ? "rotate-180" : ""}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <path d="M6 9l6 6 6-6" strokeLinecap="round" strokeLinejoin="round" />
-                    </svg>
-                  </span>
+      <span className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none">
+        <svg xmlns="http://www.w3.org/2000/svg" className={`h-4 w-4 transition-transform ${openEmp ? "rotate-180" : ""}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <path d="M6 9l6 6 6-6" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      </span>
 
-                  {openEmp && (
-                    <ul
-                      className="absolute z-40 mt-2 w-full bg-white border border-gray-200 rounded-2xl shadow-lg
-                                overflow-auto max-h-32 sm:max-h-32 text-[11px] sm:text-sm"
-                    >
-                      {EMPLOYEE_OPTIONS.map((opt) => (
-                        <li key={opt}>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setEmployees(opt);
-                              setOpenEmp(false);
-                            }}
-                            className="w-full text-left px-3 py-1.5 sm:px-4 sm:py-2 hover:bg-primary-purple/5"
-                            aria-selected={employees === opt}
-                          >
-                            {opt}
-                          </button>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
+      {openEmp && (
+        <ul
+          className="absolute z-40 mt-2 w-full bg-white border border-gray-200 rounded-2xl shadow-lg
+                     overflow-auto max-h-32 sm:max-h-32 text-[11px] sm:text-sm"
+        >
+          {EMPLOYEE_OPTIONS.map((opt) => (
+            <li key={opt}>
+              <button
+                type="button"
+                onClick={() => {
+                  setEmployees(opt);
+                  setOpenEmp(false);
+                }}
+                className="w-full text-left px-3 py-1.5 sm:px-4 sm:py-2 hover:bg-primary-purple/5"
+                aria-selected={employees === opt}
+              >
+                {opt}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  </div>
+)}
 
-                </div>
-              </div>
-            )}
+            
 
             <Button
-              text={loading ? "Saving..." : "Next Company Information"}
+              text={loading ? "Saving..." : "Next : Company Information"}
               onClick={handleContinue}
               disabled={loading}
             />

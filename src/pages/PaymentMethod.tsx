@@ -205,7 +205,7 @@ const PaymentMethod: React.FC = () => {
               {/* Card Name */}
               <div>
                 <label className="block text-[11px] text-primary-blue font-semibold mb-2">
-                  Card Name
+                  Card Name <span className="text-rose-500">*</span>
                 </label>
                 <div className="relative">
                   <span className="absolute left-4 top-1/2 -translate-y-1/2 pointer-events-none">
@@ -234,7 +234,7 @@ const PaymentMethod: React.FC = () => {
               {/* Card Number */}
               <div>
                 <label className="block text-[11px] text-primary-blue font-semibold mb-2">
-                  Card Number
+                  Card Number <span className="text-rose-500">*</span>
                 </label>
                 <div className="relative">
                   <span className="absolute left-4 top-1/2 -translate-y-1/2 pointer-events-none">
@@ -264,7 +264,7 @@ const PaymentMethod: React.FC = () => {
               {/* Expiry */}
               <div>
                 <label className="block text-[11px] text-primary-blue font-semibold mb-2">
-                  Expiry
+                  Expiry <span className="text-rose-500">*</span>
                 </label>
                 <div className="relative flex items-center gap-2">
                   {/* Icon */}
@@ -359,7 +359,7 @@ const PaymentMethod: React.FC = () => {
               {/* CVV */}
               <div>
                 <label className="block text-[11px] text-primary-blue font-semibold mb-2">
-                  CVV
+                  CVV <span className="text-rose-500">*</span>
                 </label>
                 <div className="relative">
                   <span className="absolute left-4 top-1/2 -translate-y-1/2 pointer-events-none">

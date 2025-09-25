@@ -12,6 +12,8 @@ import "react-toastify/dist/ReactToastify.css";
 import { RegistrationContext } from "../context/RegistrationProvider";
 import { categories } from "./Category";
 
+const serverUrl = import.meta.env.VITE_SERVER_URL;
+
 const BusinessRegistration: React.FC = () => {
   const navigate = useNavigate();
   const ctx = useContext(RegistrationContext);
@@ -63,44 +65,67 @@ const BusinessRegistration: React.FC = () => {
     setCompanyName(registrationData.companyName || "");
   }, [registrationData]);
 
-  const handleContinue: React.MouseEventHandler<HTMLButtonElement> = () => {
-    const emailRegex = /^[^\s@]+@[^\s@]+\.(com|org|net|edu|gov|mil|info|biz|xyz|online)(\.[a-z]{2,})?$/i;
-    const nameRegex = /^[A-Za-z]+$/;
+ const handleContinue: React.MouseEventHandler<HTMLButtonElement> = async () => {
+  const emailRegex = /^[^\s@]+@[^\s@]+\.(com|org|net|edu|gov|mil|info|biz|xyz|online)(\.[a-z]{2,})?$/i;
+  const nameRegex = /^[A-Za-z]+$/;
 
-    if (!nameRegex.test(firstName.trim())) {
-      toast.error("First name should contain only letters without spaces.");
-      return;
+  if (!nameRegex.test(firstName.trim())) {
+    toast.error("First name should contain only letters without spaces.");
+    return;
+  }
+  if (!nameRegex.test(lastName.trim())) {
+    toast.error("Last name should contain only letters without spaces.");
+    return;
+  }
+
+  const missingBasics =
+    !firstName.trim() || !lastName.trim() || !email.trim() || !industry.trim();
+  const missingCompany = isCompany && !companyName.trim();
+
+  if (missingBasics || missingCompany) {
+    toast.error("Please fill out all fields.");
+    return;
+  }
+
+  if (!emailRegex.test(email)) {
+    toast.error("Please enter a valid email address");
+    return;
+  }
+
+  try {
+    const res = await fetch(`${serverUrl}/auth/check_email/`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      },
+      body: JSON.stringify({ email: email.trim() }),
+    });
+
+    if (res.status === 200) {
+      setRegistrationData((prev) => ({
+        ...prev,
+        firstName: firstName.trim(),
+        lastName: lastName.trim(),
+        email: email.trim(),
+        industry: industry.trim(),
+        companyName: isCompany ? companyName.trim() : "",
+      }));
+
+      navigate("/BusinessType");
+    } else if (res.status === 400) {
+      toast.error("Email is already registered.");
+    } else {
+      const errTxt = await res.text();
+      toast.error(`Failed (${res.status}): ${errTxt || "Unknown error"}`);
     }
-    if (!nameRegex.test(lastName.trim())) {
-      toast.error("Last name should contain only letters without spaces.");
-      return;
-    }
+  } catch (err) {
+    console.error(err);
+    toast.error("Network error. Please try again.");
+  }
+};
 
-    const missingBasics =
-      !firstName.trim() || !lastName.trim() || !email.trim() || !industry.trim();
-    const missingCompany = isCompany && !companyName.trim();
 
-    if (missingBasics || missingCompany) {
-      toast.error("Please fill out all fields.");
-      return;
-    }
-
-    if (!emailRegex.test(email)) {
-      toast.error("Please enter a valid email address");
-      return;
-    }
-
-    setRegistrationData(prev => ({
-      ...prev,
-      firstName: firstName.trim(),
-      lastName: lastName.trim(),
-      email: email.trim(),
-      industry: industry.trim(),
-      companyName: isCompany ? companyName.trim() : "",
-    }));
-
-    navigate("/BusinessType");
-  };
 
   return (
     <div className="grid md:grid-cols-5 w-full min-h-screen">
@@ -125,7 +150,7 @@ const BusinessRegistration: React.FC = () => {
               <div className="flex flex-row items-center justify-between gap-4 w-full">
                 <div className="w-full">
                   <label className="block text-[11px] text-primary-blue font-semibold mb-1.5">
-                    First Name
+                    First Name <span className="text-rose-500">*</span>
                   </label>
                   <div className="relative">
                     <span className="absolute left-4 top-1/2 -translate-y-1/2 pointer-events-none">
@@ -145,7 +170,7 @@ const BusinessRegistration: React.FC = () => {
                 {/* Last Name */}
                 <div className="w-full">
                   <label className="block text-[11px] text-primary-blue font-semibold mb-1.5">
-                    Last Name
+                    Last Name <span className="text-rose-500">*</span>
                   </label>
                   <div className="relative">
                     <span className="absolute left-4 top-1/2 -translate-y-1/2 pointer-events-none">
@@ -166,7 +191,7 @@ const BusinessRegistration: React.FC = () => {
               {/* Email */}
               <div>
                 <label className="block text-[11px] text-primary-blue font-semibold mb-1.5">
-                  Email
+                  Email <span className="text-rose-500">*</span>
                 </label>
                 <div className="relative">
                   <span className="absolute left-4 top-1/2 -translate-y-1/2 pointer-events-none">
@@ -187,7 +212,7 @@ const BusinessRegistration: React.FC = () => {
               {/* Industry Selection */}
               <div>
                 <label className="block text-[11px] text-primary-blue font-semibold mb-1.5">
-                  Industry Selection
+                  Industry Selection <span className="text-rose-500">*</span>
                 </label>
                 <div className="relative">
                   <span className="absolute left-4 top-1/2 -translate-y-1/2 pointer-events-none">
@@ -284,7 +309,7 @@ const BusinessRegistration: React.FC = () => {
               {isCompany && (
                 <div>
                   <label className="block text-[11px] text-primary-blue font-semibold mb-1.5">
-                    Company Name
+                    Company Name <span className="text-rose-500">*</span>
                   </label>
                   <div className="relative">
                    <span className="absolute left-4 top-1/2 -translate-y-1/2 pointer-events-none">
@@ -316,7 +341,7 @@ const BusinessRegistration: React.FC = () => {
               )}
             </div>
 
-            <Button text="Business Type Selection" onClick={handleContinue} />
+            <Button text="Next : Business Type Selection" onClick={handleContinue} />
           </div>
         </div>
       </div>

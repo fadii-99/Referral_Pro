@@ -184,7 +184,7 @@ const PasswordCreation: React.FC = () => {
                 </span>
               </label>
 
-              <Button text="Confirm" onClick={handleConfirm} />
+              <Button text="Next : Select Subscription" onClick={handleConfirm} />
             </div>
           </div>
         </div>

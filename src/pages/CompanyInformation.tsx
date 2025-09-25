@@ -19,7 +19,7 @@ import {
   parsePhoneNumberFromString,
   getExampleNumber,
 } from "libphonenumber-js";
-// 👇 TypeScript ko chup karane ke liye any
+
 import rawMetadata from "libphonenumber-js/metadata.full.json";
 const metadata: any = rawMetadata;
 
@@ -46,7 +46,7 @@ const CompanyInformation: React.FC = () => {
   const [website, setWebsite] = useState(registrationData.website);
 
   // Phone + Country
-  const [country, setCountry] = useState("PK"); // Default Pakistan
+  const [country, setCountry] = useState("US"); // Default Pakistan
   const [localPhone, setLocalPhone] = useState(""); // User entered part
   const [openDropdown, setOpenDropdown] = useState(false);
 
@@ -67,35 +67,35 @@ const CompanyInformation: React.FC = () => {
     }
   }, [registrationData]);
 
-  const handleContinue: React.MouseEventHandler<HTMLButtonElement> = () => {
-    if (
-      !address1.trim() ||
-      !city.trim() ||
-      !postCode.trim() ||
-      !localPhone.trim() ||
-      !website.trim()
-    ) {
-      toast.error("Please fill out all required fields.");
-      return;
-    }
+ const handleContinue: React.MouseEventHandler<HTMLButtonElement> = () => {
+  if (
+    !address1.trim() ||
+    !city.trim() ||
+    !postCode.trim() ||
+    !localPhone.trim()
+  ) {
+    toast.error("Please fill out all required fields.");
+    return;
+  }
 
-    // Postcode must be numeric
-    const postCodeRegex = /^[0-9]+$/;
-    if (!postCodeRegex.test(postCode.trim())) {
-      toast.error("Please enter a valid numeric postal code without spaces.");
-      return;
-    }
+  // Postcode must be numeric
+  const postCodeRegex = /^[0-9]+$/;
+  if (!postCodeRegex.test(postCode.trim())) {
+    toast.error("Please enter a valid numeric postal code without spaces.");
+    return;
+  }
 
-    // City must contain only letters & spaces
-    const cityRegex = /^[A-Za-z ]+$/;
-    if (!cityRegex.test(city.trim())) {
-      toast.error(
-        "City name should only contain letters and spaces (no numbers or special characters)."
-      );
-      return;
-    }
+  // City must contain only letters & spaces
+  const cityRegex = /^[A-Za-z ]+$/;
+  if (!cityRegex.test(city.trim())) {
+    toast.error(
+      "City name should only contain letters and spaces (no numbers or special characters)."
+    );
+    return;
+  }
 
-    // Website validation (basic domain check)
+  // Website validation → only if user entered something
+  if (website.trim()) {
     const websiteRegex =
       /^www\.[^\s]+\.(com|org|net|edu|gov|mil|info|biz|xyz|online|io|ai|tech|app|dev)(\.[a-z]{2,3})?$/i;
     if (!websiteRegex.test(website.trim())) {
@@ -104,46 +104,48 @@ const CompanyInformation: React.FC = () => {
       );
       return;
     }
+  }
 
-    // Build full phone number string
-    const dialCode = countries.find((c) => c.code === country)?.dialCode || "";
-    const fullPhone = `${dialCode}${localPhone}`;
+  // Build full phone number string
+  const dialCode = countries.find((c) => c.code === country)?.dialCode || "";
+  const fullPhone = `${dialCode}${localPhone}`;
 
-    // Phone validation
-    const parsed = parsePhoneNumberFromString(fullPhone);
-    let expectedLength: number | null = null;
+  // Phone validation
+  const parsed = parsePhoneNumberFromString(fullPhone);
+  let expectedLength: number | null = null;
 
-    try {
-      const exampleNum = getExampleNumber(country as any, metadata);
-      if (exampleNum) {
-        expectedLength = exampleNum.nationalNumber.toString().length;
-      }
-    } catch {
-      expectedLength = null;
+  try {
+    const exampleNum = getExampleNumber(country as any, metadata);
+    if (exampleNum) {
+      expectedLength = exampleNum.nationalNumber.toString().length;
     }
+  } catch {
+    expectedLength = null;
+  }
 
-    if (!parsed || !parsed.isValid()) {
-      const example = countries.find((c) => c.code === country);
-      let msg = `Phone number for ${example?.name || country} must be valid.`;
-      if (expectedLength) {
-        msg = `Phone number for ${example?.name || country} must be valid and contain ${expectedLength} digits.`;
-      }
-      toast.error(msg);
-      return;
+  if (!parsed || !parsed.isValid()) {
+    const example = countries.find((c) => c.code === country);
+    let msg = `Phone number for ${example?.name || country} must be valid.`;
+    if (expectedLength) {
+      msg = `Phone number for ${example?.name || country} must be valid and contain ${expectedLength} digits.`;
     }
+    toast.error(msg);
+    return;
+  }
 
-    setRegistrationData((prev) => ({
-      ...prev,
-      address1: address1.trim(),
-      address2: address2.trim(),
-      city: city.trim(),
-      postCode: postCode.trim(),
-      phone: parsed.number, // full formatted number like +923001234567
-      website: website.trim(),
-    }));
+  setRegistrationData((prev) => ({
+    ...prev,
+    address1: address1.trim(),
+    address2: address2.trim(),
+    city: city.trim(),
+    postCode: postCode.trim(),
+    phone: parsed.number, // full formatted number like +923001234567
+    website: website.trim(), // empty string allowed
+  }));
 
-    navigate("/PasswordCreation");
-  };
+  navigate("/PasswordCreation");
+};
+
 
   return (
     <div className="grid md:grid-cols-5 w-full min-h-screen">
@@ -207,7 +209,7 @@ const CompanyInformation: React.FC = () => {
             <div className="grid grid-cols-2 gap-3 md:gap-4">
                <div>
                   <label className="block text-[11px] text-primary-blue font-semibold mb-1.5">
-                    City
+                    City <span className="text-rose-500">*</span>
                   </label>
                   <div className="relative">
                     <span className="absolute left-4 top-1/2 -translate-y-1/2 text-primary-purple">
@@ -227,7 +229,7 @@ const CompanyInformation: React.FC = () => {
                 {/* Post Code */}
                 <div>
                   <label className="block text-[11px] text-primary-blue font-semibold mb-1.5">
-                    Post Code
+                    Post Code <span className="text-rose-500">*</span>
                   </label>
                   <div className="relative">
                     <span className="absolute left-4 top-1/2 -translate-y-1/2 text-primary-purple">
@@ -248,7 +250,7 @@ const CompanyInformation: React.FC = () => {
             {/* Phone with Custom Dropdown */}
             <div>
               <label className="block text-[11px] text-primary-blue font-semibold mb-1.5">
-                Business Phone Number
+                Business Phone Number <span className="text-rose-500">*</span>
               </label>
               <div className="relative flex">
                 {/* Custom Dropdown Button */}
@@ -330,7 +332,7 @@ const CompanyInformation: React.FC = () => {
               </div>
            </div>
 
-            <Button text="Next Create Your Password" onClick={handleContinue} />
+            <Button text="Next : Create Your Password" onClick={handleContinue} />
           </div>
         </div>
       </div>

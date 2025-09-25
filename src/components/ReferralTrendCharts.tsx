@@ -27,10 +27,10 @@ ChartJS.register(
 ChartJS.unregister(ChartDataLabels);
 
 const ReferralTrendsChart: React.FC = () => {
-  // Brand colors
-  const lineColor = "#00C4F4";
-  const topFill = "rgba(0, 196, 244, 0.45)";
-  const bottomFill = "rgba(0, 196, 244, 0.06)";
+  // Theme colors
+  const lineColor = "#02025c"; // primary-blue
+  const topFill = "rgba(36, 212, 254, 0.45)"; // secondary-blue light
+  const bottomFill = "rgba(124, 90, 246, 0.06)"; // primary-purple very light
 
   // Gradient fill
   const gradientBg = (context: any) => {
@@ -76,7 +76,7 @@ const ReferralTrendsChart: React.FC = () => {
         intersect: false,
         displayColors: false,
         padding: 10,
-        backgroundColor: "#0ea5e9",
+        backgroundColor: "#7c5af6", // primary-purple
         titleColor: "#fff",
         bodyColor: "#fff",
         callbacks: {
@@ -85,7 +85,7 @@ const ReferralTrendsChart: React.FC = () => {
         },
       },
       datalabels: {
-        display: false, // 🚀 disables permanent numbers
+        display: false,
       },
     },
     elements: {
@@ -101,11 +101,11 @@ const ReferralTrendsChart: React.FC = () => {
         grid: { display: false },
         border: {
           display: true,
-          color: "rgba(0, 196, 244, 0.35)",
+          color: "rgba(36, 212, 254, 0.35)", // secondary-blue faint
           width: 2,
         },
         ticks: {
-          color: "#0b0d3b",
+          color: "#02025c", // primary-blue
           font: { weight: "700" as const },
         },
       },

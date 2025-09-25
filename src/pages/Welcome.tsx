@@ -102,7 +102,7 @@ const Welcome: React.FC = () => {
           </div>
 
           <div className="mt-6">
-            <Button text="Continue" onClick={onContinue} />
+            <Button text="Register" onClick={onContinue} />
           </div>
 
           <p className="mt-8 text-center text-xs text-gray-600">
