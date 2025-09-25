@@ -15,8 +15,20 @@ from accounts.models import User, BusinessInfo, FavoriteCompany
 # utils
 from utils.email_service import send_app_download_email, send_referral_email
 from utils.twilio_service import TwilioService
+from utils.storage_backends import generate_presigned_url
 
-
+def IMAGEURL(image_path):
+    image_url = None
+    if hasattr(image_path, 'url'):
+        # Check if it's a URL (from social login) or a file
+        if str(image_path).startswith(('http://', 'https://')):
+            # It's a URL from social login
+            image_url = str(image_path)
+        else:
+            # It's a file stored in storage
+            print("user.image", image_path)
+            image_url = generate_presigned_url(f"media/{image_path}", expires_in=3600)
+    return image_url
 
 
 class ListCompaniesView(APIView):
@@ -30,15 +42,21 @@ class ListCompaniesView(APIView):
         favorite_company_ids = set(
             FavoriteCompany.objects.filter(user=request.user).values_list('company_id', flat=True)
         )
+
+        
         
         companies_list = []
         for company in companies:
+            image_url = None
+            if company.image:
+                image_url = generate_presigned_url(f"media/{company.image}", expires_in=3600)
+
             company_data = {
                 "id": company.id,
                 "email": company.email,
                 "full_name": company.full_name,
                 "phone": company.phone,
-                "image": company.image.url if company.image else None,
+                "image": image_url,
                 "is_favorite": company.id in favorite_company_ids
             }
             if hasattr(company, 'business_info'):
@@ -268,7 +286,6 @@ class ListSoloReferralView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
-        print(request.data)
         referrals = None
         if request.data.get("referral_type") == "referred_by":
             referrals = Referral.objects.filter(referred_by=request.user.id).select_related(
@@ -299,7 +316,7 @@ class ListSoloReferralView(APIView):
                 
                 # Get company image from user profile
                 if referral.company.image:
-                    company_image = referral.company.image.url
+                    company_image = generate_presigned_url(f"media/{referral.company.image}", expires_in=3600)
             except AttributeError:
                 # Handle cases where company relationships might not exist
                 company_name = "Unknown Company"
@@ -307,16 +324,21 @@ class ListSoloReferralView(APIView):
             display_name = company_name
             if not display_name:
                 display_name = business_info.user.full_name 
+
+            
             
             referral_list.append({
                 "id": referral.id,
                 "reference_id": referral.reference_id,
                 "referred_to_email": referral.referred_to.email,
                 "referred_to_name": referral.referred_to.full_name,
+                "referred_to_image": IMAGEURL(referral.referred_to.image) if referral.referred_to.image else None,
                 "referred_by_email": referral.referred_by.email,
                 "referred_by_name": referral.referred_by.full_name,
+                "referred_by_image":  IMAGEURL(referral.referred_by.image) if referral.referred_by.image else None,
                 "industry": industry,
                 "company_name": display_name,
+                "company_image": company_image,
                 "company_type": company_type,
                 "status": referral.status,
                 "date": referral.created_at.strftime("%d %b %Y") if referral.created_at else None,
@@ -347,7 +369,6 @@ class UpdateReferralPrivacyView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
-        print(request.data)
         referral_id = request.data.get("referral_id")
         privacy_status = request.data.get("privacy")
         
@@ -473,7 +494,6 @@ class ListCompanyReferralView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
-        print(request.data)
         if request.data.get("referral_id"):
             referrals = Referral.objects.filter(reference_id=request.data.get("referral_id"), company=request.user)
         else:
@@ -499,7 +519,7 @@ class ListCompanyReferralView(APIView):
                     company_name = referral.company.company_name
                     company_type = getattr(referral.company, 'biz_type', "")
                 if getattr(referral.company, 'image', None):
-                    company_image = referral.company.image.url
+                    company_image = generate_presigned_url(f"media/{referral.company.image}", expires_in=3600)
             except AttributeError:
                 company_name = "Unknown Company"
                 company_type = "Unknown"
@@ -529,9 +549,11 @@ class ListCompanyReferralView(APIView):
                 "reference_id": referral.reference_id,
                 "referred_to_email": referral.referred_to.email,
                 "referred_to_name": referral.referred_to.full_name,
+                "referred_to_image": IMAGEURL(referral.referred_to.image) if referral.referred_to.image else None,
                 "referred_to_phone": referral.referred_to.phone,
                  "referred_by_email": referral.referred_by.email,
                 "referred_by_name": referral.referred_by.full_name,
+                "referred_by_image": IMAGEURL(referral.referred_by.image) if referral.referred_by.image else None,
                 "industry": industry,
                 "company_name": display_name,
                 "company_type": company_type,
@@ -598,7 +620,6 @@ class ListRepReferralView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        print(request.user)
         
         # Handle case where no assignments exist for the user
         try:
@@ -646,7 +667,7 @@ class ListRepReferralView(APIView):
                 
                 # Get company image from user profile
                 if referral.company.image:
-                    company_image = referral.company.image.url
+                    company_image = generate_presigned_url(f"media/{referral.company.image}", expires_in=3600)
             except AttributeError:
                 # Handle cases where company relationships might not exist
                 company_name = "Unknown Company"
@@ -664,9 +685,11 @@ class ListRepReferralView(APIView):
                 "referred_to_id": referral.referred_to.id,
                 "referred_to_email": referral.referred_to.email,
                 "referred_to_name": referral.referred_to.full_name,
+                "referred_to_image": IMAGEURL(referral.referred_to.image) if referral.referred_to.image else None,
                 "referred_by_id": referral.referred_by.id,
                 "referred_by_email": referral.referred_by.email,
                 "referred_by_name": referral.referred_by.full_name,
+                "referred_by_image": IMAGEURL(referral.referred_by.image) if referral.referred_by.image else None,
                 "industry": industry,
                 "company_name": display_name,
                 "company_type": company_type,
@@ -765,7 +788,6 @@ class SendAppInvitationView(APIView):
     def post(self, request):
         data = request.data
 
-        print(data)
         
         # Get data from request
         email = data.get("email")

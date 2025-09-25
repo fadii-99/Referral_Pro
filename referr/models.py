@@ -53,10 +53,42 @@ class Referral(models.Model):
         return f"Referral {self.reference_id} from {self.referred_by.email} to {self.referred_to.email} ({self.company.company_name})"
 
     def save(self, *args, **kwargs):
+        # Generate reference_id if not exists
         if not self.reference_id:
             self.reference_id = f"REF-{uuid.uuid4().hex[:8].upper()}"
+        
+        # Check if status changed to completed and reward not given yet
+        if self.pk:  # Only for existing objects
+            old_instance = Referral.objects.get(pk=self.pk)
+            if (old_instance.status != "completed" and 
+                self.status == "completed" and 
+                not self.reward_given):
+                self._give_reward()
+        
         super().save(*args, **kwargs)
 
+    def _give_reward(self):
+        """Give 100 points reward to the referred_by user"""
+        try:
+            # Assuming User model has a 'points' field
+            # If not, you might need to create a separate UserProfile or Points model
+            if hasattr(self.referred_by, 'points'):
+                self.referred_by.points += 100
+                self.referred_by.save()
+            
+            # Mark reward as given
+            self.reward_given = True
+            
+            # Optional: Create a reward transaction record
+            ReferralReward.objects.create(
+                referral=self,
+                user=self.referred_by,
+                points_awarded=100,
+                reason=f"Referral {self.reference_id} completed"
+            )
+        except Exception as e:
+            # Log the error but don't break the save operation
+            print(f"Error giving reward: {e}")
 
 
 class ReferralAssignment(models.Model):
@@ -75,6 +107,23 @@ class ReferralAssignment(models.Model):
     notes = models.TextField(blank=True, null=True)
    
 
+class ReferralReward(models.Model):
+    """Track referral rewards given to users"""
+    referral = models.OneToOneField(
+        Referral,
+        on_delete=models.CASCADE,
+        related_name="reward_record"
+    )
+    user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name="referral_rewards"
+    )
+    points_awarded = models.IntegerField(default=100)
+    reason = models.CharField(max_length=255)
+    awarded_at = models.DateTimeField(auto_now_add=True)
 
+    def __str__(self):
+        return f"{self.points_awarded} points to {self.user.email} for {self.referral.reference_id}"
 
 

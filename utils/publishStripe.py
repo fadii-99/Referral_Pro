@@ -16,6 +16,5 @@ def generate_token(card_number, expiration_month, expiration_year, cvv):
         )
     tokenId = token_response['id']
 
-    print(tokenId)
 
     return tokenId

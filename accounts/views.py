@@ -21,7 +21,7 @@ from utils.otp_utils import generate_otp, verify_otp
 from utils.twilio_service import TwilioService
 from utils.email_service import send_otp, send_invitation_email, send_company_signup_email, send_payment_failed_email, send_payment_success_email, send_solo_signup_success_email
 from utils.stripe_payment import stripe_payment
-
+from utils.storage_backends import generate_presigned_url
 # google auth
 from google.oauth2 import id_token
 from google.auth.transport import requests as google_requests
@@ -49,6 +49,20 @@ def get_tokens_for_user(user):
     refresh = RefreshToken.for_user(user)
     return {"refresh": str(refresh), "access": str(refresh.access_token)}
 
+
+class checkEmailExistsView(APIView):
+    permission_classes = [AllowAny]
+    authentication_classes = []
+
+    def post(self, request):
+        email = request.data.get("email")
+        if not email:
+            return Response({"error": "Email is required"}, status=400)
+        
+        exists = User.objects.filter(email=email).exists()
+        if not exists:
+            return Response({"error": "Email exists, try another email"}, status=400)
+        return Response({"message": "Success"}, status=200)
 
 # -------------------------
 # Manual signup/login (Solo)
@@ -107,7 +121,7 @@ class SignupView(APIView):
             # Create BusinessInfo linked to user
             business = BusinessInfo.objects.create(
                 user=user,  # ✅ Add this line to link BusinessInfo to the user
-                company_name=data.get("companyInfo", {}).get("companyName", ""),
+                company_name=data.get("basic", {}).get("companyName", ""),
                 industry=data.get("basic", {}).get("industry", ""),
                 employees=data.get("businessType", {}).get("employees", ""),
                 biz_type=data.get("businessType", {}).get("type", ""),
@@ -872,11 +886,13 @@ class UserInfoView(APIView):
                     image_url = str(user.image)
                 else:
                     # It's a file stored in storage
-                    image_url = f"{settings.MEDIA_URL}{user.image}" if user.image else None
+                    print("user.image", user.image)
+                    image_url = generate_presigned_url(f"media/{user.image}", expires_in=3600)
+                    # image_url = f"{settings.MEDIA_URL}{user.image}" if user.image else None
             except (ValueError, FileNotFoundError):
                 # Handle cases where file doesn't exist or invalid URL
                 image_url = None
-
+        print("image_url", image_url)
         return Response({
             "user": {
                 "id": user.id,
@@ -1052,6 +1068,117 @@ class LogoutView(APIView):
             return Response({"message": "Logout successful."}, status=200)
         except TokenError:
             return Response({"error": "Invalid or expired token."}, status=400)
+
+
+
+
+
+class AccountDeletionView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        """Verify OTP and delete account"""
+        temp_token = request.data.get('temp_token')
+
+
+        if not temp_token:
+            return Response({"error": "OTP is required"}, status=400)
+        
+        # decoded_token = RefreshToken(temp_token)
+        # user_id = decoded_token.payload.get('user_id')
+        # user = User.objects.get(id=user_id)
+
+        user = request.user
+
+
+        user_email = user.email
+        user_name = user.full_name
+        user_role = user.role
+
+        try:
+            # If user is a company, handle employee cleanup
+            if user.role == "company":
+                # Delete all employees under this company
+                employees = User.objects.filter(parent_company=user, role="employee")
+                employee_count = employees.count()
+                employees.delete()
+                
+                # Delete business info if exists
+                if hasattr(user, 'business_info'):
+                    user.business_info.delete()
+                
+                # Cancel subscriptions if any
+                if hasattr(user, 'subscriptions'):
+                    # Note: You might want to add Stripe subscription cancellation logic here
+                    user.subscriptions.all().delete()
+                
+                # Delete transactions
+                if hasattr(user, 'transactions'):
+                    user.transactions.all().delete()
+
+            # Delete favorite companies
+            FavoriteCompany.objects.filter(user=user).delete()
+            
+            # Delete referral usage records
+            ReferralUsage.objects.filter(used_by=user).delete()
+            
+            # Finally delete the user
+            # user.delete()
+            user.is_delete = True
+            user.is_active = False
+            user.email = user.email + f"_deleted"
+            user.phone = user.phone + f"_deleted" if user.phone else None
+            user.save()
+
+
+            response_message = f"Account deleted successfully for {user_email}"
+            if user_role == "company" and 'employee_count' in locals():
+                response_message += f" along with {employee_count} employee accounts"
+
+            return Response({
+                "message": response_message,
+                "deleted_user": {
+                    "email": user_email,
+                    "name": user_name,
+                    "role": user_role
+                }
+            }, status=200)
+
+        except Exception as e:
+            return Response({
+                "error": f"Failed to delete account: {str(e)}"
+            }, status=500)
+
+
+class ResetPasswordView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        print(request.data)
+        current_password = request.data.get('current_password')
+        new_password = request.data.get('new_password')
+
+        if not current_password or not new_password:
+            return Response({"error": "Both current password and new password are required"}, status=400)
+
+        user = request.user
+
+        # Verify current password
+        if not user.check_password(current_password):
+            return Response({"error": "Current password is incorrect"}, status=400)
+
+        # Check if new password is different from current
+        if user.check_password(new_password):
+            return Response({"error": "New password must be different from current password"}, status=400)
+
+        # Set new password
+        user.set_password(new_password)
+        user.save()
+
+        return Response({
+            "message": "Password reset successfully"
+        }, status=200)
+
 
 
 

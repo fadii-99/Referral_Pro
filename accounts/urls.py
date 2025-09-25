@@ -14,6 +14,9 @@ from .views import (
     TestEmployeeManagementView,
     UpdateUserView,
     SetEmployeePasswordView,
+    ResetPasswordView,
+    AccountDeletionView,
+    checkEmailExistsView
 )
 
 urlpatterns = [
@@ -27,6 +30,7 @@ urlpatterns = [
     path('send_otp/', SendOTPView.as_view(), name='send_otp'),
     path('verify_otp/', VerifyOTPView.as_view(), name='verify_otp'),
     path('reset_password/', CreateNewPasswordView.as_view(), name='reset_password'),
+    path('check_email/', checkEmailExistsView.as_view(), name='get_user'),
 
     path('get_user/', UserInfoView.as_view(), name='get_user'),
     path('update_user/', UpdateUserView.as_view(), name='update_user'),
@@ -38,9 +42,9 @@ urlpatterns = [
 
     # Delete user by email
     path('delete/', DeleteUsersByIdsView.as_view(), name='delete_user'),
+    path('update_password/', ResetPasswordView.as_view(), name='update_password'),
+    path('account_deletion/', AccountDeletionView.as_view(), name='account_deletion'),
 
     # Social auth endpoints
-    # path('google/', GoogleLoginView.as_view(), name='google_login'),
     path('facebook/callback/<str:code>/', SocialLoginView.as_view(), name='facebook_login'),
-    # path('apple/', AppleLoginView.as_view(), name='apple_login'),
 ]

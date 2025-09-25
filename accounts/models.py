@@ -65,7 +65,10 @@ class User(AbstractBaseUser, PermissionsMixin):
         blank=True,
         limit_choices_to={"role": "company"},
     )
+
+    
     is_active = models.BooleanField(default=True)
+    is_delete = models.BooleanField(default=False)
     is_staff = models.BooleanField(default=False)
     is_paid = models.BooleanField(default=False)
     is_verified = models.BooleanField(default=False)

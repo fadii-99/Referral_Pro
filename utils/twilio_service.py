@@ -47,5 +47,39 @@ class TwilioService:
         except Exception as e:
             return {"success": False, "error": str(e)}
 
+    @classmethod
+    def send_referral_sms(cls, phone_number: str, referred_to_name: str, company_name: str, referred_by_name: str,reason: str = None, request_description: str = None):
+        """
+        Send an SMS notification when a referral is created.
+        """
+        service = cls()
+        
+        try:
+            # Format the reason and description parts
+            reason_text = f"\nReason: {reason}" if reason else ""
+            description_text = f"\nNotes: {request_description}" if request_description else ""
+            
+            message_body = (
+                f"Hi {referred_to_name}!\n\n"
+                f"{referred_by_name} has referred you to {company_name} via ReferralPro."
+                f"{reason_text}"
+                f"{description_text}\n\n"
+                "Regards,\nReferralPro Team"
+            )
+
+            message = service.client.messages.create(
+                body=message_body,
+                from_=settings.TWILIO_PHONE_NUMBER,
+                to=phone_number
+            )
+            
+            print(f"Referral SMS sent to {phone_number}")
+            return {"success": True, "sid": message.sid}
+
+        except Exception as e:
+            print(f"Failed to send referral SMS to {phone_number}: {str(e)}")
+            return {"success": False, "error": str(e)}
+
+
 
 

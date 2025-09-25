@@ -4,7 +4,6 @@ import os
 load_dotenv() 
 
 def initiate_payment(total_payment, tokenId, plan_name, username):
-    # stripe.api_key = 'sk_test_51PQ6OP04AHp8Ze31SFhdISvLLtIA896V7GK9c83wsBOQwKkmHXO8a7bDbsxJvlaUpd8iZdSWIRIzKB7duyvxxINa00Z9Ymxwef'
     stripe.api_key = os.environ["STRIPE_SECRET_KEY"]
 
     token = stripe.Token.retrieve(tokenId)
