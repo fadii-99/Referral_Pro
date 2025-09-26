@@ -39,7 +39,8 @@ INSTALLED_APPS = [
     # Local apps
     'accounts',
     'referr',
-    'rewards'
+    'rewards',
+    'chat'
 ]
 
 # -------------------------

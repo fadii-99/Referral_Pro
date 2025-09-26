@@ -398,6 +398,30 @@ class NotificationConsumer(AsyncWebsocketConsumer):
         }))
 
 
+
+# consumers.py
+class ChatListConsumer(AsyncWebsocketConsumer):
+    async def connect(self):
+        print("🔌 WS connect attempt:", self.scope["path"])
+        self.user = self.scope["user"]
+        if not self.user or self.user.is_anonymous:
+            await self.close(code=4001)
+            return
+        self.group_name = f"chat_list_{self.user.id}"
+        await self.channel_layer.group_add(self.group_name, self.channel_name)
+        await self.accept()
+
+    async def disconnect(self, close_code):
+        await self.channel_layer.group_discard(self.group_name, self.channel_name)
+
+    async def chat_list_update(self, event):
+        await self.send(text_data=json.dumps({
+            "type": "chat_list_update",
+            "chat_rooms": event["chat_rooms"],
+        }))
+
+
+
 # Utility functions for sending notifications
 @database_sync_to_async
 def send_notification_to_user(user_id, notification_type, data):

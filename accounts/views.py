@@ -61,8 +61,9 @@ class checkEmailExistsView(APIView):
         
         exists = User.objects.filter(email=email).exists()
         if not exists:
-            return Response({"error": "Email exists, try another email"}, status=400)
-        return Response({"message": "Success"}, status=200)
+            return Response({"message": "Success"}, status=200)
+        return Response({"error": "Email exists, try another email"}, status=400)
+        
 
 # -------------------------
 # Manual signup/login (Solo)

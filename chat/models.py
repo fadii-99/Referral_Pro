@@ -16,8 +16,8 @@ class ChatRoom(models.Model):
     ]
     
     room_id = models.CharField(max_length=100, unique=True)
-    room_type = models.CharField(max_length=20, choices=ROOM_TYPES)
     referral = models.ForeignKey(Referral, on_delete=models.CASCADE, related_name='chat_rooms')
+    room_type = models.CharField(max_length=20, null=True, blank=True)
     
     # Participants
     solo_user = models.ForeignKey(
@@ -83,24 +83,19 @@ class ChatRoom(models.Model):
     
     @classmethod
     def create_room_for_referral(cls, referral, solo_user, assigned_rep=None):
-        """Create a chat room for a referral"""
         company_user = referral.company
         
-        # Check business type to determine room type
         if hasattr(company_user, 'business_info') and company_user.business_info.biz_type == 'individual':
-            # Individual business type - direct company to solo chat
             room_type = 'company_solo'
             room_id = f"company_{company_user.id}_solo_{solo_user.id}_ref_{referral.id}"
             rep_user = None
         else:
-            # Regular business with reps
             if not assigned_rep:
                 raise ValueError("Rep is required for non-individual business type")
             room_type = 'rep_solo'
             room_id = f"rep_{assigned_rep.id}_solo_{solo_user.id}_ref_{referral.id}"
             rep_user = assigned_rep
         
-        # Check if room already exists
         existing_room = cls.objects.filter(
             referral=referral,
             solo_user=solo_user,
@@ -111,8 +106,7 @@ class ChatRoom(models.Model):
         if existing_room:
             return existing_room
         
-        # Create new room
-        room = cls.objects.create(
+        return cls.objects.create(
             room_id=room_id,
             room_type=room_type,
             referral=referral,
@@ -120,8 +114,7 @@ class ChatRoom(models.Model):
             rep_user=rep_user,
             company_user=company_user
         )
-        
-        return room
+
 
 
 class Message(models.Model):

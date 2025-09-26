@@ -136,14 +136,15 @@ class ChatRoomDetailView(APIView):
             MessageReadStatus.objects.bulk_create(new_reads)
 
 
+from asgiref.sync import async_to_sync
+from channels.layers import get_channel_layer
+
 class CreateChatRoomView(APIView):
-    """
-    Create a new chat room for a referral
-    """
     permission_classes = [IsAuthenticated]
     
     def post(self, request):
-        """Create a chat room for a referral"""
+        print("CreateChatRoomView POST called")
+        print("Request data:", request.data)
         try:
             referral_id = request.data.get('referral_id')
             solo_user_id = request.data.get('solo_user_id')
@@ -154,35 +155,14 @@ class CreateChatRoomView(APIView):
                     'error': 'referral_id and solo_user_id are required'
                 }, status=status.HTTP_400_BAD_REQUEST)
             
-            # Get the referral and solo user
+            # Get referral and solo user
             referral = get_object_or_404(Referral, id=referral_id)
             solo_user = get_object_or_404(User, id=solo_user_id, role='solo')
-            
-            # Check permissions based on user role
-            if request.user.role == 'company':
-                # Company creating room - check if it's their referral
-                if referral.company != request.user:
-                    return Response({
-                        'success': False,
-                        'error': 'You can only create rooms for your own referrals'
-                    }, status=status.HTTP_403_FORBIDDEN)
-                
-                # Check business type
-                business_info = getattr(request.user, 'business_info', None)
-                if business_info and business_info.biz_type == 'individual':
-                    # Individual business - direct company to solo chat
-                    chat_room = ChatRoom.create_room_for_referral(
-                        referral=referral,
-                        solo_user=solo_user
-                    )
-                else:
-                    return Response({
-                        'success': False,
-                        'error': 'Non-individual businesses must assign a rep first'
-                    }, status=status.HTTP_400_BAD_REQUEST)
-                    
-            elif request.user.role == 'rep':  # employee
-                # Rep creating room - check if they're assigned to this referral
+
+            print("Authenticated user role:", request.user.role)
+
+            # Case 1: Employee (Rep assigned to referral)
+            if request.user.role == 'employee':
                 assignment = ReferralAssignment.objects.filter(
                     referral=referral,
                     assigned_to=request.user
@@ -197,17 +177,31 @@ class CreateChatRoomView(APIView):
                 chat_room = ChatRoom.create_room_for_referral(
                     referral=referral,
                     solo_user=solo_user,
-                    assigned_rep=request.user
+                    assigned_rep=assignment.assigned_to
                 )
-                
+
+            # Case 2: Individual business (Company ↔ Solo)
+            elif getattr(request.user, 'business_info', None) and request.user.business_info.biz_type == 'individual':
+                chat_room = ChatRoom.create_room_for_referral(
+                    referral=referral,
+                    solo_user=solo_user
+                )
+
+            # Case 3: Other companies must assign a rep
             else:
                 return Response({
                     'success': False,
-                    'error': 'Only companies and reps can create chat rooms'
-                }, status=status.HTTP_403_FORBIDDEN)
-            
-            # Create participant records
+                    'error': 'Non-individual businesses must assign a rep first'
+                }, status=status.HTTP_400_BAD_REQUEST)
+                    
+            # Create participants
             self._create_participant_records(chat_room)
+            
+            # Send chat list updates to all participants (non-blocking)
+            try:
+                self._send_chat_list_updates_for_new_room(chat_room)
+            except Exception as notification_error:
+                print(f"Chat list update error (non-critical): {notification_error}")
             
             serializer = ChatRoomSerializer(chat_room, context={'request': request})
             
@@ -218,10 +212,31 @@ class CreateChatRoomView(APIView):
             }, status=status.HTTP_201_CREATED)
             
         except Exception as e:
+            print(f"Error creating chat room: {e}")
             return Response({
                 'success': False,
                 'error': str(e)
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    def _send_chat_list_updates_for_new_room(self, chat_room):
+        """
+        Notify all participants that their chat list has a new/updated room.
+        """
+        channel_layer = get_channel_layer()
+        participants = chat_room.get_participants()
+
+        from .serializers import ChatRoomListSerializer
+        serialized = ChatRoomListSerializer([chat_room], many=True).data
+
+        for user in participants:
+            async_to_sync(channel_layer.group_send)(
+                f"chat_list_{user.id}",
+                {
+                    "type": "chat_list_update",
+                    "chat_rooms": serialized,
+                }
+            )
+
     
     def _create_participant_records(self, chat_room):
         """Create participant records for the chat room"""
@@ -254,6 +269,76 @@ class CreateChatRoomView(APIView):
         
         ChatParticipant.objects.bulk_create(participants, ignore_conflicts=True)
 
+    # def _send_chat_list_updates_for_new_room(self, chat_room):
+    #     """Send chat list updates to all participants for a new room"""
+    #     try:
+    #         from asgiref.sync import async_to_sync
+    #         from channels.layers import get_channel_layer
+            
+    #         channel_layer = get_channel_layer()
+            
+    #         if not channel_layer:
+    #             print("No channel layer configured")
+    #             return
+            
+    #         # Get all participants
+    #         participants = chat_room.get_participants()
+            
+    #         for participant in participants:
+    #             # Get updated chat room data for this specific user
+    #             user_chat_rooms = self._get_user_chat_rooms_for_create(participant)
+                
+    #             # Serialize the updated chat room list
+    #             serializer = ChatRoomListSerializer(
+    #                 user_chat_rooms, 
+    #                 many=True, 
+    #                 context={'request': type('obj', (object,), {'user': participant})()}
+    #             )
+                
+    #             # Send to user's chat list group
+    #             async_to_sync(channel_layer.group_send)(
+    #                 f"chat_list_{participant.id}",
+    #                 {
+    #                     "type": "chat_list_update",
+    #                     "chat_rooms": serializer.data
+    #                 }
+    #             )
+                
+    #             print(f"Sent new room update to user {participant.id}")
+                
+    #     except Exception as e:
+    #         print(f"Error sending new room updates: {str(e)}")
+    #         raise  # Re-raise so the calling code can handle it
+    
+    def _get_user_chat_rooms_for_create(self, user):
+        """Get chat rooms for a specific user based on their role"""
+        if user.role == 'solo':
+            chat_rooms = ChatRoom.objects.filter(solo_user=user)
+        elif user.role == 'rep' or user.role == 'employee':  # employee role
+            chat_rooms = ChatRoom.objects.filter(rep_user=user)
+        elif user.role == 'company':
+            # Company can see their direct rooms and rooms of their reps
+            chat_rooms = ChatRoom.objects.filter(
+                Q(company_user=user) | 
+                Q(rep_user__parent_company=user)
+            )
+        else:
+            chat_rooms = ChatRoom.objects.none()
+        
+        # Add unread message count and last message info
+        chat_rooms = chat_rooms.annotate(
+            unread_count=Count(
+                'messages', 
+                filter=~Q(messages__read_statuses__user=user)
+            )
+        ).select_related(
+            'solo_user', 'rep_user', 'company_user', 'referral'
+        ).prefetch_related(
+            'messages'
+        ).order_by('-last_message_at')
+        
+        return chat_rooms
+
 
 class SendMessageView(APIView):
     """
@@ -263,6 +348,7 @@ class SendMessageView(APIView):
     
     def post(self, request, room_id):
         """Send a message to the chat room"""
+        print(request.GET)
         try:
             chat_room = ChatRoom.objects.get(room_id=room_id)
             
@@ -286,15 +372,18 @@ class SendMessageView(APIView):
                 }, status=status.HTTP_403_FORBIDDEN)
             
             # Create message
-            serializer = MessageCreateSerializer(data=request.data)
+            serializer = MessageCreateSerializer(
+                data=request.data,
+                context={'chat_room': chat_room, 'sender': request.user}
+            )
             if serializer.is_valid():
-                message = serializer.save(
-                    chat_room=chat_room,
-                    sender=request.user
-                )
+                message = serializer.save()
                 
-                # Send notification to other participants
-                self._send_message_notifications(chat_room, message)
+                # Send chat list updates to all participants
+                try:
+                    self._send_chat_list_updates(chat_room)
+                except Exception as notification_error:
+                    print(f"Notification error (non-critical): {notification_error}")
                 
                 response_serializer = MessageSerializer(message, context={'request': request})
                 
@@ -309,39 +398,88 @@ class SendMessageView(APIView):
                     'errors': serializer.errors
                 }, status=status.HTTP_400_BAD_REQUEST)
                 
-        except ChatRoom.DoesNotExist:
+        except ChatRoom.DoesNotExist as e:
+            print(f"ChatRoom not found: {str(e)}")
             return Response({
                 'success': False,
                 'error': 'Chat room not found'
             }, status=status.HTTP_404_NOT_FOUND)
+        except Exception as e:
+            print(f"Unexpected error in SendMessageView: {str(e)}")
+            return Response({
+                'success': False,
+                'error': 'An unexpected error occurred'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
     
-    def _send_message_notifications(self, chat_room, message):
-        """Send notifications to other participants about new message"""
-        from channels.layers import get_channel_layer
-        import asyncio
-        
-        channel_layer = get_channel_layer()
-        
-        # Get all participants except the sender
-        participants = chat_room.get_participants()
-        
-        for participant in participants:
-            if participant != message.sender:
-                # Send WebSocket notification
-                notification_group = f'notifications_{participant.id}'
+    def _send_chat_list_updates(self, chat_room):
+        """Send chat list updates to all participants"""
+        try:
+            from asgiref.sync import async_to_sync
+            from channels.layers import get_channel_layer
+            
+            channel_layer = get_channel_layer()
+            
+            if not channel_layer:
+                print("No channel layer configured")
+                return
+            
+            # Get all participants
+            participants = chat_room.get_participants()
+            
+            for participant in participants:
+                # Get updated chat room data for this specific user
+                user_chat_rooms = self._get_user_chat_rooms(participant)
                 
-                asyncio.create_task(
-                    channel_layer.group_send(
-                        notification_group,
-                        {
-                            'type': 'new_message_notification',
-                            'chat_room_id': chat_room.room_id,
-                            'sender_name': message.sender.full_name,
-                            'message_preview': message.content[:100],
-                            'timestamp': message.created_at.isoformat()
-                        }
-                    )
+                # Serialize the updated chat room list
+                serializer = ChatRoomListSerializer(
+                    user_chat_rooms, 
+                    many=True, 
+                    context={'request': type('obj', (object,), {'user': participant})()}
                 )
+                
+                # Send to user's chat list group
+                async_to_sync(channel_layer.group_send)(
+                    f"chat_list_{participant.id}",
+                    {
+                        "type": "chat_list_update",
+                        "chat_rooms": serializer.data
+                    }
+                )
+                
+                print(f"Sent chat list update to user {participant.id}")
+                
+        except Exception as e:
+            print(f"Error sending chat list updates: {str(e)}")
+            raise  # Re-raise so the calling code can handle it
+    
+    def _get_user_chat_rooms(self, user):
+        """Get chat rooms for a specific user based on their role"""
+        if user.role == 'solo':
+            chat_rooms = ChatRoom.objects.filter(solo_user=user)
+        elif user.role == 'rep':  # employee role
+            chat_rooms = ChatRoom.objects.filter(rep_user=user)
+        elif user.role == 'company':
+            # Company can see their direct rooms and rooms of their reps
+            chat_rooms = ChatRoom.objects.filter(
+                Q(company_user=user) | 
+                Q(rep_user__parent_company=user)
+            )
+        else:
+            chat_rooms = ChatRoom.objects.none()
+        
+        # Add unread message count and last message info
+        chat_rooms = chat_rooms.annotate(
+            unread_count=Count(
+                'messages', 
+                filter=~Q(messages__read_statuses__user=user)
+            )
+        ).select_related(
+            'solo_user', 'rep_user', 'company_user', 'referral'
+        ).prefetch_related(
+            'messages'
+        ).order_by('-last_message_at')
+        
+        return chat_rooms
 
 
 class ChatAnalyticsView(APIView):

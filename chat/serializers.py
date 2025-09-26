@@ -60,19 +60,21 @@ class MessageSerializer(serializers.ModelSerializer):
 
 
 class MessageCreateSerializer(serializers.ModelSerializer):
-    """Serializer for creating messages"""
-    
     class Meta:
         model = Message
-        fields = ['content', 'message_type', 'file_url', 'file_name', 'file_size']
-    
-    def validate_content(self, value):
-        """Validate message content"""
-        if not value or not value.strip():
-            raise serializers.ValidationError("Message content cannot be empty")
-        if len(value) > 5000:  # Reasonable limit
-            raise serializers.ValidationError("Message content is too long")
-        return value.strip()
+        fields = ['message_type', 'content', 'file_url', 'file_name', 'file_size']
+        # chat_room and sender are set in the view, not provided by the client
+
+    def create(self, validated_data):
+        # pull injected context
+        chat_room = self.context.get('chat_room')
+        sender = self.context.get('sender')
+
+        return Message.objects.create(
+            chat_room=chat_room,
+            sender=sender,
+            **validated_data
+        )
 
 
 class ChatParticipantSerializer(serializers.ModelSerializer):

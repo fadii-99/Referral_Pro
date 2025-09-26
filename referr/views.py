@@ -351,7 +351,6 @@ class ListSoloReferralView(APIView):
                 "referral_type": request.data.get("referral_type"),
             })
 
-        print(referral_list)
 
         return Response(
             {
