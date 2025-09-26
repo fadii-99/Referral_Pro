@@ -30,48 +30,32 @@ class ReferralBasicSerializer(serializers.ModelSerializer):
         fields = ['id', 'reference_id', 'service_type', 'status', 'created_at']
 
 
+
+
 class MessageSerializer(serializers.ModelSerializer):
-    """Serializer for chat messages with comprehensive media support"""
     sender = UserBasicSerializer(read_only=True)
     is_read = serializers.SerializerMethodField()
     read_count = serializers.SerializerMethodField()
-    reply_to = serializers.SerializerMethodField()
-    file_size_formatted = serializers.CharField(source='file_size_formatted', read_only=True)
-    
+
     class Meta:
         model = Message
         fields = [
-            'id', 'sender', 'message_type', 'content', 'file_url', 
-            'file_name', 'file_size', 'file_size_formatted', 'file_type',
-            'duration', 'thumbnail_url', 'dimensions', 'is_edited', 
-            'edited_at', 'created_at', 'is_read', 'read_count', 'reply_to'
+            'id', 'sender', 'message_type', 'content',
+            'file_url', 'file_name', 'file_size',
+            'is_edited', 'edited_at', 'created_at',
+            'is_read', 'read_count',
         ]
-    
+
     def get_is_read(self, obj):
-        """Check if current user has read this message"""
         request = self.context.get('request')
         if request and hasattr(request, 'user'):
-            return MessageReadStatus.objects.filter(
-                message=obj, 
-                user=request.user
-            ).exists()
+            return obj.read_statuses.filter(user=request.user).exists()
         return False
-    
+
     def get_read_count(self, obj):
-        """Get total read count for this message"""
         return obj.read_statuses.count()
-    
-    def get_reply_to(self, obj):
-        """Get reply message info if this message is a reply"""
-        if obj.reply_to:
-            return {
-                'id': obj.reply_to.id,
-                'content': obj.reply_to.content[:100] if obj.reply_to.content else '',
-                'sender_name': obj.reply_to.sender.full_name,
-                'message_type': obj.reply_to.message_type,
-                'file_name': obj.reply_to.file_name if obj.reply_to.is_media else None
-            }
-        return None
+
+
 
 
 class MessageCreateSerializer(serializers.ModelSerializer):

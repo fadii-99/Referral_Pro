@@ -5,10 +5,11 @@ from datetime import datetime
 from channels.generic.websocket import AsyncWebsocketConsumer
 from channels.db import database_sync_to_async
 from django.apps import apps
-
+from django.contrib.auth import get_user_model
+User = get_user_model()
 logger = logging.getLogger(__name__)
-
-
+from chat.models import ChatRoom, ChatParticipant, Message, MessageReadStatus
+from utils.storage_backends import generate_presigned_url
 # ---------------------------------------------
 # ChatConsumer
 # ---------------------------------------------
@@ -357,21 +358,96 @@ class NotificationConsumer(AsyncWebsocketConsumer):
 # ChatListConsumer
 # ---------------------------------------------
 class ChatListConsumer(AsyncWebsocketConsumer):
+    @database_sync_to_async
+    def get_user_chat_rooms(self):
+        ChatRoom = apps.get_model("chat", "ChatRoom")
+        ChatParticipant = apps.get_model("chat", "ChatParticipant")
+        
+        if not self.user or self.user.is_anonymous:
+            print("⚠️ Cannot get chat rooms for anonymous user")
+            return []
+        
+        from django.db.models import Q
+        
+        # Query chat rooms based on user role and relationships
+        if self.user.role == 'solo':
+            chat_rooms = ChatRoom.objects.filter(solo_user=self.user)
+        elif self.user.role == 'employee':
+            chat_rooms = ChatRoom.objects.filter(rep_user=self.user)
+        elif self.user.role == 'company':
+            # Company can see rooms where they are direct participants
+            # or rooms where their reps are participants
+            chat_rooms = ChatRoom.objects.filter(
+                Q(company_user=self.user) | 
+                Q(rep_user__parent_company=self.user)
+            )
+        else:
+            chat_rooms = ChatRoom.objects.none()
+        
+        # Optimize queries with select_related
+        chat_rooms = chat_rooms.select_related(
+            'solo_user', 'rep_user', 'company_user', 'referral'
+        ).prefetch_related(
+            'messages', 'participants'
+        ).distinct().order_by('-last_message_at')
+        
+        return [
+            {
+                "room_id": room.room_id,
+                "room_type": room.room_type,
+                "chat_name": room.get_display_name(self.user),
+                "last_message": room.get_last_message_summary(),
+                "unread_count": room.get_unread_count(self.user),
+                "is_online": room.is_any_participant_online(exclude_user=self.user),
+                "is_active": room.is_active,
+                "created_at": room.created_at.isoformat(),
+                "updated_at": room.updated_at.isoformat(),
+                "referral_id": room.referral.reference_id if room.referral else None,
+                "image_url": generate_presigned_url(f"media/{room.get_chat_image(self.user)}", expires_in=3600),
+            }
+            for room in chat_rooms
+        ]
+
+    @database_sync_to_async
+    def get_user_profile_info(self):
+        """Get additional user profile information"""
+        if not self.user or self.user.is_anonymous:
+            return {}
+        
+        return {
+            "id": self.user.id,
+            "username": getattr(self.user, 'username', ''),
+            "email": getattr(self.user, 'email', ''),
+            "full_name": getattr(self.user, 'full_name', str(self.user)),
+            "role": getattr(self.user, 'role', ''),
+            "is_active": getattr(self.user, 'is_active', True),
+        }
     async def connect(self):
         print("🔌 WS connect attempt:", self.scope["path"])
         self.user = self.scope.get("user")
         
-        # For testing purposes, we'll allow connections even without authentication
-        # In production, you should enforce authentication
+        # Require authentication for chat list access
         if not self.user or self.user.is_anonymous:
-            print("⚠️ Unauthenticated user attempting to connect")
-            # For testing, we'll still allow the connection but with limited functionality
-            self.group_name = "chat_list_anonymous"
-        else:
-            self.group_name = f"chat_list_{self.user.id}"
+            print("⚠️ Unauthenticated user attempting to connect - closing connection")
+            await self.close(code=4001)  # Unauthorized
+            return
+
+        self.group_name = f"chat_list_{self.user.id}"
             
         await self.channel_layer.group_add(self.group_name, self.channel_name)
         await self.accept()
+        
+        # Get user's chat rooms and profile info from database
+        chat_rooms = await self.get_user_chat_rooms()
+        user_profile = await self.get_user_profile_info()
+        
+        
+        await self.send(text_data=json.dumps({
+            "type": "chat_rooms_loaded",
+            "user_profile": user_profile,
+            "chat_rooms": chat_rooms,
+            "timestamp": datetime.now().isoformat()
+        }))
         print(f"✅ WebSocket connection accepted. Group: {self.group_name}")
 
     async def disconnect(self, close_code):

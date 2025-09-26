@@ -81,6 +81,74 @@ class ChatRoom(models.Model):
             participants.append(self.rep_user)
         return participants
     
+    def get_display_name(self, viewer):
+        """Get display name based on viewer's role"""
+        if viewer == self.solo_user:
+            return self.company_user.full_name
+        elif viewer == self.rep_user or viewer == self.company_user:
+            # Rep or company sees solo user name
+            return self.solo_user.full_name
+        else:
+            return "Unknown"
+    
+    def get_chat_image(self, viewer):
+        """Get chat image based on viewer's role"""
+        if viewer == self.solo_user:
+            # Solo user sees company's image
+            return self.company_user.get_image_url()
+        elif viewer == self.rep_user or viewer == self.company_user:
+            # Rep or company sees solo user's image
+            return self.solo_user.get_image_url()
+        else:
+            return None
+    
+    def get_last_message_summary(self):
+        """Get summary of the last message in this room"""
+        last_message = self.messages.select_related('sender').last()
+        if not last_message:
+            return {
+                "content": "No messages yet",
+                "sender_name": "",
+                "timestamp": None,
+                "message_type": "system"
+            }
+        
+        # Format content based on message type
+        if last_message.message_type == 'text':
+            content = last_message.content[:100] + ('...' if len(last_message.content) > 100 else '')
+        else:
+            content = f"[{last_message.message_type.upper()}] {last_message.file_name or 'Media file'}"
+        
+        return {
+            "content": content,
+            "sender_name": last_message.sender.full_name,
+            "timestamp": last_message.created_at.isoformat(),
+            "message_type": last_message.message_type,
+            "sender_id": last_message.sender.id
+        }
+    
+    def get_unread_count(self, user):
+        """Get count of unread messages for a specific user"""
+        from django.db.models import Count, Q
+        
+        # Count messages that don't have a read status for this user
+        unread_count = self.messages.exclude(
+            read_statuses__user=user
+        ).exclude(
+            sender=user  # Don't count user's own messages as unread
+        ).count()
+        
+        return unread_count
+    
+    def is_any_participant_online(self, exclude_user=None):
+        """Check if any participant (except excluded user) is online"""
+        participants = self.participants.filter(is_online=True)
+        
+        if exclude_user:
+            participants = participants.exclude(user=exclude_user)
+        
+        return participants.exists()
+    
     @classmethod
     def create_room_for_referral(cls, referral, solo_user, assigned_rep=None):
         company_user = referral.company
@@ -192,8 +260,35 @@ class Message(models.Model):
             if not channel_layer:
                 return
             
-            # Send message to chat room
-            message_data = MessageSerializer(self).data
+            # Create a proper mock request object
+            class MockRequest:
+                def __init__(self, user):
+                    self.user = user
+                    self.META = {'HTTP_HOST': 'localhost', 'wsgi.url_scheme': 'http'}
+                
+                def build_absolute_uri(self, location=None):
+                    if location:
+                        return f"http://localhost{location}"
+                    return "http://localhost/"
+            
+            # Send message to chat room (without request context to avoid serializer issues)
+            message_data = {
+                "id": self.id,
+                "content": self.content,
+                "sender_id": self.sender.id,
+                "sender_name": getattr(self.sender, 'full_name', str(self.sender)),
+                "sender_role": getattr(self.sender, 'role', ''),
+                "message_type": self.message_type,
+                "timestamp": self.created_at.isoformat(),
+                "file_url": self.file_url,
+                "file_name": self.file_name,
+                "file_size": self.file_size,
+                "file_type": self.file_type,
+                "duration": self.duration,
+                "thumbnail_url": self.thumbnail_url,
+                "dimensions": self.dimensions,
+            }
+            
             async_to_sync(channel_layer.group_send)(
                 f"chat_{self.chat_room.room_id}",
                 {
@@ -230,12 +325,21 @@ class Message(models.Model):
                     'messages'
                 ).order_by('-last_message_at')
                 
-                # Serialize and send
-                chat_list_data = ChatRoomListSerializer(
-                    chat_rooms, 
-                    many=True,
-                    context={'request': type('obj', (object,), {'user': participant})()}
-                ).data
+                # Create serialized data manually to avoid request context issues
+                chat_list_data = []
+                for room in chat_rooms:
+                    chat_list_data.append({
+                        "room_id": room.room_id,
+                        "room_type": room.room_type,
+                        "name": room.get_display_name(participant),
+                        "last_message": room.get_last_message_summary(),
+                        "unread_count": room.get_unread_count(participant),
+                        "is_online": room.is_any_participant_online(exclude_user=participant),
+                        "is_active": room.is_active,
+                        "created_at": room.created_at.isoformat(),
+                        "updated_at": room.updated_at.isoformat(),
+                        "referral_id": room.referral.reference_id if room.referral else None,
+                    })
                 
                 async_to_sync(channel_layer.group_send)(
                     f"chat_list_{participant.id}",

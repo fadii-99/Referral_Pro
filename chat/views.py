@@ -68,6 +68,7 @@ class ChatRoomDetailView(APIView):
     
     def get(self, request, room_id):
         """Get chat room details and messages"""
+        print("roommmmscjbas ",room_id)
         try:
             chat_room = ChatRoom.objects.get(room_id=room_id)
             
@@ -77,7 +78,8 @@ class ChatRoomDetailView(APIView):
                     'success': False,
                     'error': 'You do not have access to this chat room'
                 }, status=status.HTTP_403_FORBIDDEN)
-            
+
+            print(f"Fetching messages for room {room_id} for user {request.user.id}")
             # Get messages with pagination
             page = int(request.GET.get('page', 1))
             page_size = int(request.GET.get('page_size', 50))
@@ -93,10 +95,16 @@ class ChatRoomDetailView(APIView):
             
             # Mark messages as read for current user
             self._mark_messages_as_read(messages, request.user)
-            
+            print(f"Marked {len(messages)} messages as read for user {request.user.id}")
             # Serialize data
-            room_serializer = ChatRoomSerializer(chat_room, context={'request': request})
-            message_serializer = MessageSerializer(messages, many=True, context={'request': request})
+            try:
+                room_serializer = ChatRoomSerializer(chat_room, context={'request': request})
+            except Exception as e:
+                print(f"Error serializing chat room: {str(e)}")
+            try:
+                message_serializer = MessageSerializer(messages, many=True, context={'request': request})
+            except Exception as e:
+                print(f"Error serializing chat room: {str(e)}")
             
             return Response({
                 'success': True,
@@ -109,7 +117,8 @@ class ChatRoomDetailView(APIView):
                 }
             }, status=status.HTTP_200_OK)
             
-        except ChatRoom.DoesNotExist:
+        except ChatRoom.DoesNotExist as e:
+            print(f"ChatRoom not found: {str(e)}")
             return Response({
                 'success': False,
                 'error': 'Chat room not found'
@@ -222,20 +231,41 @@ class CreateChatRoomView(APIView):
         """
         Notify all participants that their chat list has a new/updated room.
         """
-        channel_layer = get_channel_layer()
-        participants = chat_room.get_participants()
+        try:
+            channel_layer = get_channel_layer()
+            participants = chat_room.get_participants()
 
-        from .serializers import ChatRoomListSerializer
-        serialized = ChatRoomListSerializer([chat_room], many=True).data
+            # Create a proper mock request class
+            class MockRequest:
+                def __init__(self, user):
+                    self.user = user
+                    self.META = {'HTTP_HOST': 'localhost', 'wsgi.url_scheme': 'http'}
+                
+                def build_absolute_uri(self, location=None):
+                    if location:
+                        return f"http://localhost{location}"
+                    return "http://localhost/"
 
-        for user in participants:
-            async_to_sync(channel_layer.group_send)(
-                f"chat_list_{user.id}",
-                {
-                    "type": "chat_list_update",
-                    "chat_rooms": serialized,
-                }
-            )
+            from .serializers import ChatRoomListSerializer
+            
+            for user in participants:
+                mock_request = MockRequest(user)
+                serialized = ChatRoomListSerializer(
+                    [chat_room], 
+                    many=True, 
+                    context={'request': mock_request}
+                ).data
+
+                async_to_sync(channel_layer.group_send)(
+                    f"chat_list_{user.id}",
+                    {
+                        "type": "chat_list_update",
+                        "chat_rooms": serialized,
+                    }
+                )
+        except Exception as e:
+            print(f"Error in _send_chat_list_updates_for_new_room: {e}")
+            raise
 
     
     def _create_participant_records(self, chat_room):
@@ -348,7 +378,6 @@ class SendMessageView(APIView):
     
     def post(self, request, room_id):
         """Send a message to the chat room"""
-        print(request.GET)
         try:
             chat_room = ChatRoom.objects.get(room_id=room_id)
             
@@ -423,6 +452,17 @@ class SendMessageView(APIView):
                 print("No channel layer configured")
                 return
             
+            # Create a proper mock request class
+            class MockRequest:
+                def __init__(self, user):
+                    self.user = user
+                    self.META = {'HTTP_HOST': 'localhost', 'wsgi.url_scheme': 'http'}
+                
+                def build_absolute_uri(self, location=None):
+                    if location:
+                        return f"http://localhost{location}"
+                    return "http://localhost/"
+            
             # Get all participants
             participants = chat_room.get_participants()
             
@@ -430,11 +470,12 @@ class SendMessageView(APIView):
                 # Get updated chat room data for this specific user
                 user_chat_rooms = self._get_user_chat_rooms(participant)
                 
-                # Serialize the updated chat room list
+                # Serialize the updated chat room list with proper mock request
+                mock_request = MockRequest(participant)
                 serializer = ChatRoomListSerializer(
                     user_chat_rooms, 
                     many=True, 
-                    context={'request': type('obj', (object,), {'user': participant})()}
+                    context={'request': mock_request}
                 )
                 
                 # Send to user's chat list group

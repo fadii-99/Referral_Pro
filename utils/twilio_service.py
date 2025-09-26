@@ -5,14 +5,17 @@ class TwilioService:
     def __init__(self):
         self.client = Client(settings.TWILIO_ACCOUNT_SID, settings.TWILIO_AUTH_TOKEN)
 
-    def send_sms(self, phone_number: str, otp_code: str, purpose: str = "verification", expires_in: int = 10):
+    @classmethod
+    def send_sms(cls, phone_number: str, otp_code: str, purpose: str = "verification", expires_in: int = 10):
+
+        service = cls()
         message_body = (
             f"ReferralPro: Use OTP {otp_code} to {purpose.capitalize()}.\n"
             f"Expires in {expires_in} minutes.\n\n"
             "⚠️ Do not share this code with anyone."
         )
 
-        message = self.client.messages.create(
+        message = service.client.messages.create(
             body=message_body,
             from_=settings.TWILIO_PHONE_NUMBER,
             to=phone_number
@@ -46,6 +49,7 @@ class TwilioService:
 
         except Exception as e:
             return {"success": False, "error": str(e)}
+
 
     @classmethod
     def send_referral_sms(cls, phone_number: str, referred_to_name: str, company_name: str, referred_by_name: str,reason: str = None, request_description: str = None):

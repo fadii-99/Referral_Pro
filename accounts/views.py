@@ -110,6 +110,9 @@ class SignupView(APIView):
             if not email or not password:
                 return Response({"error": "Email and password required"}, status=400)
             
+            if User.objects.filter(phone=data.get("companyInfo", {}).get("phone", "")).exists():
+                return Response({"error": "Phone number already registered"}, status=400)
+            
             user = User.objects.create_user(
                 email=email,
                 password=password,
@@ -550,22 +553,23 @@ class SendOTPView(APIView):
     authentication_classes = []
 
     def post(self, request):
+        print("jbcasabcasdcpn ",request.data)
         email = request.data.get('email')
         phone = request.data.get('phone')
 
         print(request.data)
 
-        if not email and not phone:
-            return Response({"error": "Either email or phone is required"}, status=400)
 
         # Find user by email or phone
         try:
             if email:
+                print("Finding user by email:", email)
                 user = User.objects.get(email=email)
-                print("user", user.email)
             else:
                 user = User.objects.get(phone=phone)
-        except User.DoesNotExist:
+                print(user.phone)
+        except User.DoesNotExist as e:
+            print("No user found with given email/phone", str(e))
             return Response({"error": "No account found with these credentials"}, status=404)
 
         # Generate OTP
@@ -583,6 +587,7 @@ class SendOTPView(APIView):
             
             return Response({"message": f"OTP sent successfully to your {'email' if email else 'phone'}", "otp": otp.code}, status=200)
         except Exception as e:
+            print("Error sending OTP:", str(e))
             return Response({"error": f"Failed to send OTP: {str(e)}"}, status=500)
 
 
@@ -914,11 +919,14 @@ class UpdateUserView(APIView):
     def post(self, request):
         user = request.user
         data = request.data
-        print("UpdateUserView data", request.FILES)
         
         # Handle image upload separately since it's a file
         if 'image' in request.FILES:
             user.image = request.FILES['image']
+
+        if data.get("phone"):
+            if User.objects.filter(phone=data.get("phone")).exists():
+                return Response({"error": "Phone number already registered"}, status=400)
         
         # Fields that can be updated for User model (excluding image since we handle it above)
         updatable_user_fields = ['full_name', 'phone']
@@ -956,7 +964,7 @@ class UpdateUserView(APIView):
                     "email": user.email,
                     "full_name": user.full_name,
                     "phone": user.phone,
-                    "image": user.image.url if user.image else None,
+                    "image": generate_presigned_url(f"media/{user.image}", expires_in=3600) if user.image else None,
                     "role": user.role,
                     "is_verified": user.is_verified,
                 }

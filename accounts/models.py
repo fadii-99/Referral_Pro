@@ -85,7 +85,7 @@ class User(AbstractBaseUser, PermissionsMixin):
     def get_image_url(self):
         """Get the full S3 URL for the image"""
         if self.image:
-            return self.image.url
+            return self.image
         return None
 
     def generate_referral_code(self):
