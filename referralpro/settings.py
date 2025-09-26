@@ -34,6 +34,7 @@ INSTALLED_APPS = [
     'rest_framework.authtoken',
     'corsheaders',
     'storages',
+    'channels',
     # 'drf_yasg',
 
     # Local apps
@@ -75,7 +76,6 @@ TEMPLATES = [
 ]
 
 WSGI_APPLICATION = 'referralpro.wsgi.application'
-ASGI_APPLICATION = 'referralpro.asgi.application'  # for channels later
 
 # -------------------------
 # Database (MySQL)
@@ -233,3 +233,11 @@ USE_I18N = True
 USE_TZ = True
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+ASGI_APPLICATION = "referralpro.asgi.application"
+
+# Temporary: in-memory layer (works for local dev)
+CHANNEL_LAYERS = {
+    "default": {
+        "BACKEND": "channels.layers.InMemoryChannelLayer",
+    },
+}

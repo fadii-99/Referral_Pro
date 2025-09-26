@@ -1,5 +1,6 @@
 from django.urls import path
 from . import views
+from .upload_views import MediaUploadView, VoiceMessageUploadView, ImagePreviewView
 
 app_name = 'chat'
 
@@ -12,6 +13,11 @@ urlpatterns = [
     
     # Messaging
     path('rooms/<str:room_id>/messages/', views.SendMessageView.as_view(), name='send_message'),
+    
+    # File uploads
+    path('upload/media/', MediaUploadView.as_view(), name='upload_media'),
+    path('upload/voice/', VoiceMessageUploadView.as_view(), name='upload_voice'),
+    path('upload/preview/', ImagePreviewView.as_view(), name='image_preview'),
     
     # Analytics
     path('analytics/', views.ChatAnalyticsView.as_view(), name='chat_analytics'),

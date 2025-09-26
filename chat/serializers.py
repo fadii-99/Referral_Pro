@@ -31,17 +31,20 @@ class ReferralBasicSerializer(serializers.ModelSerializer):
 
 
 class MessageSerializer(serializers.ModelSerializer):
-    """Serializer for chat messages"""
+    """Serializer for chat messages with comprehensive media support"""
     sender = UserBasicSerializer(read_only=True)
     is_read = serializers.SerializerMethodField()
     read_count = serializers.SerializerMethodField()
+    reply_to = serializers.SerializerMethodField()
+    file_size_formatted = serializers.CharField(source='file_size_formatted', read_only=True)
     
     class Meta:
         model = Message
         fields = [
             'id', 'sender', 'message_type', 'content', 'file_url', 
-            'file_name', 'file_size', 'is_edited', 'edited_at', 
-            'created_at', 'is_read', 'read_count'
+            'file_name', 'file_size', 'file_size_formatted', 'file_type',
+            'duration', 'thumbnail_url', 'dimensions', 'is_edited', 
+            'edited_at', 'created_at', 'is_read', 'read_count', 'reply_to'
         ]
     
     def get_is_read(self, obj):
@@ -57,22 +60,71 @@ class MessageSerializer(serializers.ModelSerializer):
     def get_read_count(self, obj):
         """Get total read count for this message"""
         return obj.read_statuses.count()
+    
+    def get_reply_to(self, obj):
+        """Get reply message info if this message is a reply"""
+        if obj.reply_to:
+            return {
+                'id': obj.reply_to.id,
+                'content': obj.reply_to.content[:100] if obj.reply_to.content else '',
+                'sender_name': obj.reply_to.sender.full_name,
+                'message_type': obj.reply_to.message_type,
+                'file_name': obj.reply_to.file_name if obj.reply_to.is_media else None
+            }
+        return None
 
 
 class MessageCreateSerializer(serializers.ModelSerializer):
+    """Serializer for creating chat messages with media support"""
+    reply_to_id = serializers.IntegerField(required=False, write_only=True)
+    
     class Meta:
         model = Message
-        fields = ['message_type', 'content', 'file_url', 'file_name', 'file_size']
-        # chat_room and sender are set in the view, not provided by the client
+        fields = [
+            'message_type', 'content', 'file_url', 'file_name', 'file_size',
+            'file_type', 'duration', 'thumbnail_url', 'dimensions', 'reply_to_id'
+        ]
+    
+    def validate(self, data):
+        """Validate message data"""
+        message_type = data.get('message_type', 'text')
+        content = data.get('content', '').strip()
+        file_url = data.get('file_url')
+        
+        # Text messages must have content
+        if message_type == 'text' and not content:
+            raise serializers.ValidationError("Text messages cannot be empty")
+        
+        # Media messages must have file_url
+        if message_type in ['image', 'video', 'audio', 'document', 'file'] and not file_url:
+            raise serializers.ValidationError(f"{message_type.title()} messages require a file")
+        
+        return data
+    
+    def validate_reply_to_id(self, value):
+        """Validate reply message exists in the same chat room"""
+        if value:
+            chat_room = self.context.get('chat_room')
+            if not chat_room:
+                raise serializers.ValidationError("Chat room context required for reply messages")
+            
+            try:
+                reply_message = Message.objects.get(id=value, chat_room=chat_room)
+                return reply_message
+            except Message.DoesNotExist:
+                raise serializers.ValidationError("Reply message not found in this chat room")
+        return None
 
     def create(self, validated_data):
-        # pull injected context
+        """Create message with proper context"""
         chat_room = self.context.get('chat_room')
         sender = self.context.get('sender')
-
+        reply_to = validated_data.pop('reply_to_id', None)
+        
         return Message.objects.create(
             chat_room=chat_room,
             sender=sender,
+            reply_to=reply_to,
             **validated_data
         )
 
@@ -115,12 +167,19 @@ class ChatRoomSerializer(serializers.ModelSerializer):
         """Get the last message in this room"""
         last_message = obj.messages.order_by('-created_at').first()
         if last_message:
+            content = last_message.content
+            if last_message.message_type != 'text':
+                content = f"[{last_message.message_type.upper()}] {last_message.file_name or 'Media file'}"
+            elif len(content) > 100:
+                content = content[:100] + '...'
+                
             return {
                 'id': last_message.id,
-                'content': last_message.content[:100] + '...' if len(last_message.content) > 100 else last_message.content,
+                'content': content,
                 'sender_name': last_message.sender.full_name,
                 'message_type': last_message.message_type,
-                'created_at': last_message.created_at
+                'created_at': last_message.created_at,
+                'file_name': last_message.file_name if last_message.is_media else None
             }
         return None
     
@@ -176,10 +235,17 @@ class ChatRoomListSerializer(serializers.ModelSerializer):
         """Get the last message in this room"""
         last_message = obj.messages.order_by('-created_at').first()
         if last_message:
+            content = last_message.content
+            if last_message.message_type != 'text':
+                content = f"[{last_message.message_type.upper()}] {last_message.file_name or 'Media file'}"
+            elif len(content) > 50:
+                content = content[:50] + '...'
+                
             return {
-                'content': last_message.content[:50] + '...' if len(last_message.content) > 50 else last_message.content,
+                'content': content,
                 'sender_name': last_message.sender.full_name,
-                'created_at': last_message.created_at
+                'created_at': last_message.created_at,
+                'message_type': last_message.message_type
             }
         return None
     

@@ -119,11 +119,14 @@ class ChatRoom(models.Model):
 
 class Message(models.Model):
     """
-    Message model for chat conversations
+    Message model for chat conversations with comprehensive media support
     """
     MESSAGE_TYPES = [
         ('text', 'Text'),
         ('image', 'Image'),
+        ('video', 'Video'),
+        ('audio', 'Audio/Voice'),
+        ('document', 'Document'),
         ('file', 'File'),
         ('system', 'System Message'),
     ]
@@ -132,31 +135,135 @@ class Message(models.Model):
     sender = models.ForeignKey(User, on_delete=models.CASCADE, related_name='sent_messages')
     
     message_type = models.CharField(max_length=10, choices=MESSAGE_TYPES, default='text')
-    content = models.TextField()
+    content = models.TextField(blank=True)  # Optional for media messages
     
-    # File attachments
+    # File attachments with comprehensive support
     file_url = models.URLField(blank=True, null=True)
     file_name = models.CharField(max_length=255, blank=True, null=True)
-    file_size = models.PositiveIntegerField(blank=True, null=True)
+    file_size = models.PositiveIntegerField(blank=True, null=True)  # Size in bytes
+    file_type = models.CharField(max_length=100, blank=True, null=True)  # MIME type
+    
+    # Media-specific metadata
+    duration = models.PositiveIntegerField(blank=True, null=True)  # For audio/video (seconds)
+    thumbnail_url = models.URLField(blank=True, null=True)  # For videos/images
+    dimensions = models.JSONField(blank=True, null=True)  # {"width": 1920, "height": 1080}
     
     # Message status
     is_edited = models.BooleanField(default=False)
     edited_at = models.DateTimeField(null=True, blank=True)
+    
+    # Reply/Thread support
+    reply_to = models.ForeignKey('self', on_delete=models.CASCADE, null=True, blank=True, related_name='replies')
     
     # Timestamps
     created_at = models.DateTimeField(auto_now_add=True)
     
     class Meta:
         ordering = ['created_at']
+        indexes = [
+            models.Index(fields=['chat_room', '-created_at']),
+            models.Index(fields=['sender', '-created_at']),
+            models.Index(fields=['message_type']),
+        ]
     
     def __str__(self):
-        return f"{self.sender.full_name}: {self.content[:50]}..." if len(self.content) > 50 else f"{self.sender.full_name}: {self.content}"
+        if self.message_type == 'text':
+            return f"{self.sender.full_name}: {self.content[:50]}..." if len(self.content) > 50 else f"{self.sender.full_name}: {self.content}"
+        else:
+            return f"{self.sender.full_name}: [{self.message_type.upper()}] {self.file_name or 'Media file'}"
     
     def save(self, *args, **kwargs):
-        """Update chat room's last message timestamp"""
+        """Update chat room's last message timestamp and broadcast updates"""
         super().save(*args, **kwargs)
         self.chat_room.last_message_at = self.created_at
         self.chat_room.save(update_fields=['last_message_at', 'updated_at'])
+        
+        # Send real-time updates to WebSocket consumers
+        self._send_realtime_updates()
+    
+    def _send_realtime_updates(self):
+        """Send real-time updates to chat and chat-list consumers"""
+        try:
+            from asgiref.sync import async_to_sync
+            from channels.layers import get_channel_layer
+            from .serializers import MessageSerializer, ChatRoomListSerializer
+            
+            channel_layer = get_channel_layer()
+            if not channel_layer:
+                return
+            
+            # Send message to chat room
+            message_data = MessageSerializer(self).data
+            async_to_sync(channel_layer.group_send)(
+                f"chat_{self.chat_room.room_id}",
+                {
+                    "type": "chat_message",
+                    "message": message_data
+                }
+            )
+            
+            # Send chat list updates to all participants
+            participants = self.chat_room.get_participants()
+            for participant in participants:
+                # Get updated chat rooms for this participant
+                from django.db.models import Q, Count
+                if participant.role == 'solo':
+                    chat_rooms = ChatRoom.objects.filter(solo_user=participant)
+                elif participant.role in ['rep', 'employee']:
+                    chat_rooms = ChatRoom.objects.filter(rep_user=participant)
+                elif participant.role == 'company':
+                    chat_rooms = ChatRoom.objects.filter(
+                        Q(company_user=participant) | 
+                        Q(rep_user__parent_company=participant)
+                    )
+                else:
+                    continue
+                
+                chat_rooms = chat_rooms.annotate(
+                    unread_count=Count(
+                        'messages', 
+                        filter=~Q(messages__read_statuses__user=participant)
+                    )
+                ).select_related(
+                    'solo_user', 'rep_user', 'company_user', 'referral'
+                ).prefetch_related(
+                    'messages'
+                ).order_by('-last_message_at')
+                
+                # Serialize and send
+                chat_list_data = ChatRoomListSerializer(
+                    chat_rooms, 
+                    many=True,
+                    context={'request': type('obj', (object,), {'user': participant})()}
+                ).data
+                
+                async_to_sync(channel_layer.group_send)(
+                    f"chat_list_{participant.id}",
+                    {
+                        "type": "chat_list_update",
+                        "chat_rooms": chat_list_data
+                    }
+                )
+                
+        except Exception as e:
+            print(f"Error sending real-time updates: {e}")
+    
+    @property
+    def is_media(self):
+        """Check if message contains media"""
+        return self.message_type in ['image', 'video', 'audio', 'document', 'file']
+    
+    @property
+    def file_size_formatted(self):
+        """Return human-readable file size"""
+        if not self.file_size:
+            return None
+        
+        for unit in ['B', 'KB', 'MB', 'GB']:
+            if self.file_size < 1024.0:
+                return f"{self.file_size:.1f} {unit}"
+            self.file_size /= 1024.0
+        return f"{self.file_size:.1f} TB"
 
 
 class MessageReadStatus(models.Model):
