@@ -572,6 +572,9 @@ class SendOTPView(APIView):
             print("No user found with given email/phone", str(e))
             return Response({"error": "No account found with these credentials"}, status=404)
 
+        if user.role != request.data.get('role'):
+            return Response({"error": f"Unauthorized access: your profile type does not match this endpoint."}, status=404)
+
         # Generate OTP
         otp = generate_otp(user, purpose="password_reset", expires_in=10)
         print(otp.code)
@@ -662,7 +665,7 @@ class CreateNewPasswordView(APIView):
             return Response({"error": "Invalid or expired token"}, status=400)
 
 
-
+ 
 # =========================================
 # Employee Invitation & Password Setup
 # =========================================
@@ -882,24 +885,19 @@ class UserInfoView(APIView):
 
     def post(self, request):
         user = User.objects.get(id=request.user.id)
-        # image_url = user.get_image_url()
         image_url = None
+
         if user.image and hasattr(user.image, 'url'):
             try:
-                # Check if it's a URL (from social login) or a file
                 if str(user.image).startswith(('http://', 'https://')):
-                    # It's a URL from social login
                     image_url = str(user.image)
                 else:
-                    # It's a file stored in storage
-                    print("user.image", user.image)
                     image_url = generate_presigned_url(f"media/{user.image}", expires_in=3600)
-                    # image_url = f"{settings.MEDIA_URL}{user.image}" if user.image else None
             except (ValueError, FileNotFoundError):
-                # Handle cases where file doesn't exist or invalid URL
                 image_url = None
-        print("image_url", image_url)
-        return Response({
+
+        # Base user response
+        response_data = {
             "user": {
                 "id": user.id,
                 "email": user.email,
@@ -908,9 +906,28 @@ class UserInfoView(APIView):
                 "role": user.role,
                 "image": image_url,
                 "is_passwordSet": user.is_passwordSet,
-                "is_paid": user.is_paid
-            },
-        }, status=200)
+                "is_paid": user.is_paid,
+            }
+        }
+
+        # Add business info if exists
+        if hasattr(user, 'business_info'):
+            business_info = user.business_info
+            response_data["business_info"] = {
+                "company_name": business_info.company_name,
+                "industry": business_info.industry,
+                "employees": business_info.employees,
+                "biz_type": business_info.biz_type,
+                "address1": business_info.address1,
+                "address2": business_info.address2,
+                "city": business_info.city,
+                "post_code": business_info.post_code,
+                "website": business_info.website,
+                "us_state": business_info.us_state,
+            }
+
+        return Response(response_data, status=200)
+
 
 
 class UpdateUserView(APIView):
@@ -1157,6 +1174,9 @@ class AccountDeletionView(APIView):
             return Response({
                 "error": f"Failed to delete account: {str(e)}"
             }, status=500)
+
+
+
 
 
 class ResetPasswordView(APIView):
