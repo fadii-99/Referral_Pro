@@ -3,7 +3,6 @@ from accounts.models import User
 import uuid
 
 
-
 class Referral(models.Model):
     STATUS_CHOICES = [
         ("pending", "Pending"),
@@ -38,6 +37,8 @@ class Referral(models.Model):
     notes = models.TextField(blank=True, null=True)
     privacy_opted = models.BooleanField(default=False)
     permission_consent = models.BooleanField(default=False)
+    is_to_be_registered = models.BooleanField(default=False)
+
 
     status = models.CharField(
         max_length=20, choices=STATUS_CHOICES, default="pending"
@@ -45,6 +46,7 @@ class Referral(models.Model):
     referred_by_approval = models.BooleanField(default=False)
     company_approval = models.BooleanField(default=False)
     reward_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0.00)
+    reward_given = models.BooleanField(default=False)   # ✅ Added field
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -70,16 +72,13 @@ class Referral(models.Model):
     def _give_reward(self):
         """Give 100 points reward to the referred_by user"""
         try:
-            # Assuming User model has a 'points' field
-            # If not, you might need to create a separate UserProfile or Points model
             if hasattr(self.referred_by, 'points'):
                 self.referred_by.points += 100
                 self.referred_by.save()
             
-            # Mark reward as given
-            self.reward_given = True
-            
-            # Optional: Create a reward transaction record
+            self.reward_given = True   # ✅ will now work
+            self.save(update_fields=["reward_given"])
+
             ReferralReward.objects.create(
                 referral=self,
                 user=self.referred_by,
@@ -87,8 +86,8 @@ class Referral(models.Model):
                 reason=f"Referral {self.reference_id} completed"
             )
         except Exception as e:
-            # Log the error but don't break the save operation
-            print(f"Error giving reward: {e}")
+            print(f"Error giving reward: {str(e)}")
+
 
 
 class ReferralAssignment(models.Model):

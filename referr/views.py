@@ -8,6 +8,7 @@ from rest_framework import status
 from django.db import models
 from django.db.models import Count, Sum
 from django.utils.timezone import now, timedelta
+from django.db.models import Sum
 
 
 # models
@@ -29,7 +30,6 @@ def IMAGEURL(image_path):
             image_url = str(image_path)
         else:
             # It's a file stored in storage
-            print("user.image", image_path)
             image_url = generate_presigned_url(f"media/{image_path}", expires_in=3600)
     return image_url
 
@@ -39,73 +39,85 @@ class DashboardStatsView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        user = request.user
+        try:
+            user = request.user
 
-        # Referrals created by this user
-        referrals_created = Referral.objects.filter(referred_by=user).count()
+            # Referrals created by this user
+            referrals_created = Referral.objects.filter(company=user).count()
 
-        # Referrals accepted by companies
-        referrals_accepted = Referral.objects.filter(
-            referred_by=user, status="business_accepted"
-        ).count()
+            # Referrals accepted by companies
+            referrals_accepted = Referral.objects.filter(
+                company=user, status="in_progress"
+            ).count()
 
-        # Referrals completed
-        referrals_completed = Referral.objects.filter(
-            referred_by=user, status="completed"
-        ).count()
+            # ✅ Referrals completed (count)
+            referrals_completed_count = Referral.objects.filter(
+                company=user, status="completed"
+            ).count()
 
-        # Total points earned (from ReferralReward)
-        points_allocated = ReferralReward.objects.filter(user=user).aggregate(
-            total_points=Sum("points_awarded")
-        )["total_points"] or 0
+            # ✅ Completed referral IDs for reward sum
+            completed_referrals = Referral.objects.filter(
+                company=user, status="completed"
+            ).values_list("id", flat=True)
 
-        # Conversion rate for cash value (example: 1 point = $1)
-        points_cashed_value = float(points_allocated) * 1.0
+            # ✅ Total points earned (from ReferralReward)
+            total_awards = ReferralReward.objects.filter(
+                referral_id__in=completed_referrals
+            ).aggregate(
+                total_points=Sum("points_awarded")
+            )["total_points"] or 0
 
-        # Missed opportunities (cancelled or rejected)
-        missed_opportunity = Referral.objects.filter(
-            referred_by=user, status="cancelled"
-        ).count()
+            # Conversion rate for cash value (example: 1 point = $1)
+            points_cashed_value = float(total_awards) / 10.0
 
-        # ----------------------
-        # Graph data (last 7 days)
-        # ----------------------
-        today = now().date()
-        start_date = today - timedelta(days=6)
+            # Missed opportunities (cancelled or rejected)
+            missed_opportunity = Referral.objects.filter(
+                company=user, status="cancelled"
+            ).count()
 
-        referrals_per_day = (
-            Referral.objects.filter(referred_by=user, created_at__date__gte=start_date)
-            .extra(select={"day": "date(created_at)"})
-            .values("day")
-            .annotate(count=Count("id"))
-            .order_by("day")
-        )
+            # ----------------------
+            # Graph data (last 7 days)
+            # ----------------------
+            today = now().date()
+            start_date = today - timedelta(days=6)
 
-        # Build dict {day: count}
-        daily_counts = {str(item["day"]): item["count"] for item in referrals_per_day}
+            referrals_per_day = (
+                Referral.objects.filter(company=user, created_at__date__gte=start_date)
+                .extra(select={"day": "date(created_at)"})
+                .values("day")
+                .annotate(count=Count("id"))
+                .order_by("day")
+            )
 
-        graph_data = []
-        for i in range(7):
-            day = start_date + timedelta(days=i)
-            graph_data.append({
-                "date": day.strftime("%Y-%m-%d"),
-                "day": day.strftime("%a"),  # Sat, Sun, Mon...
-                "count": daily_counts.get(str(day), 0)
-            })
+            daily_counts = {str(item["day"]): item["count"] for item in referrals_per_day}
 
-        return Response(
-            {
-                "referrals_created": referrals_created,
-                "referrals_accepted": referrals_accepted,
-                "referrals_completed": referrals_completed,
-                "total_points_allocated": points_allocated,
-                "points_cashed_value": points_cashed_value,
-                "missed_opportunity": missed_opportunity,
-                "graph_data": graph_data,
-            },
-            status=status.HTTP_200_OK,
-        )
+            graph_data = []
+            for i in range(7):
+                day = start_date + timedelta(days=i)
+                graph_data.append({
+                    "date": day.strftime("%Y-%m-%d"),
+                    "day": day.strftime("%a"),
+                    "count": daily_counts.get(str(day), 0)
+                })
 
+            return Response(
+                {
+                    "referrals_created": referrals_created,
+                    "referrals_accepted": referrals_accepted,
+                    "referrals_completed": referrals_completed_count,
+                    "total_points_allocated": total_awards,
+                    "points_cashed_value": points_cashed_value,
+                    "missed_opportunity": missed_opportunity,
+                    "graph_data": graph_data,
+                },
+                status=status.HTTP_200_OK,
+            )
+        except Exception as e:
+            print(f"Error fetching dashboard stats: {str(e)}")
+            return Response(
+                {"error": f"Error fetching dashboard stats: {str(e)}"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
 
 
 
@@ -227,74 +239,92 @@ class SendReferralView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
-        data = request.data
-        print(data)
-        company_id = data.get("company_id")
-        referred_to_email = data.get("referred_to_email")
-        referred_to_phone = data.get("referred_to_phone")
-        referred_to_name = data.get("referred_to_name")
-        reason = data.get("reason")
-        privacy = data.get("privacy", False)
-        urgency_level = data.get("urgency_level")
-        request_description = data.get("request_description")
-        permission_consent = data.get("permission_consent", False)
-
-        if not company_id or not referred_to_email or not referred_to_name:
-            return Response(
-                {"error": "company_id, email, and name are required"},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        if request.user.email == referred_to_email:
-            return Response(
-                {"error": "You cannot refer yourself"},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
         try:
-            # company = BusinessInfo.objects.get(id=company_id)
-            COMPANY = User.objects.get(id=company_id)
-        except BusinessInfo.DoesNotExist:
-            return Response({"error": "Company not found"}, status=status.HTTP_404_NOT_FOUND)
-        
+            data = request.data
+            company_id = data.get("company_id")
+            referred_to_email = data.get("referred_to_email")
+            referred_to_phone = data.get("referred_to_phone")
+            referred_to_name = data.get("referred_to_name")
+            reason = data.get("reason")
+            privacy = data.get("privacy", False)
+            urgency_level = data.get("urgency_level")
+            request_description = data.get("request_description")
+            permission_consent = data.get("permission_consent", False)
 
-        # If referred_to user exists, use it. Otherwise, create a placeholder.
-        referred_to_user, _ = User.objects.get_or_create(
-            email=referred_to_email,
-            defaults={"full_name": referred_to_name, "phone": referred_to_phone, "role": "solo"},
-        )
+            if not company_id or not referred_to_email or not referred_to_name:
+                return Response(
+                    {"error": "company_id, email, and name are required"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
 
-        referral = Referral.objects.create(
-            referred_by=request.user,
-            referred_to=referred_to_user,
-            company=COMPANY,
-            service_type=reason,
-            urgency=urgency_level,
-            notes=request_description,
-            privacy_opted=privacy,
-            permission_consent=permission_consent,
-        )
+            if request.user.email == referred_to_email:
+                return Response(
+                    {"error": "You cannot refer yourself"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
 
-        send_referral_email(
-            referred_to_email=referred_to_email,
-            referred_to_name=referred_to_name,
-            company_name=COMPANY.full_name,  
-            referred_by_name=request.user.full_name,
-            reason=reason,
-            request_description=request_description,
-        )
+            try:
+                company = BusinessInfo.objects.get(user_id=company_id)
+                COMPANY = User.objects.get(id=company_id)
+            except Exception as e:
+                print(f"Error fetching company: {str(e)}")
+                return Response({"error": "Company not found"}, status=status.HTTP_404_NOT_FOUND)
+            
+
+            # If referred_to user exists, use it. Otherwise, create a placeholder.
+            referred_to_user, _ = User.objects.get_or_create(
+                email=referred_to_email,
+                
+                defaults={"full_name": referred_to_name, "phone": referred_to_phone, "role": "solo", 'is_to_be_registered': True},
+            )
+
+            referral = Referral.objects.create(
+                referred_by=request.user,
+                referred_to=referred_to_user,
+                company=COMPANY,
+                service_type=reason,
+                urgency=urgency_level,
+                notes=request_description,
+                privacy_opted=privacy,
+                permission_consent=permission_consent,
+            )
+
+            send_referral_email(
+                referred_to_email=referred_to_email,
+                referred_to_name=referred_to_name,
+                company_name=company.company_name if company.company_name else COMPANY.full_name,  
+                referred_by_name=request.user.full_name,
+                reason=reason,
+                request_description=request_description,
+            )
+
+            if referred_to_phone:
+                TwilioService.send_referral_sms(
+                    phone_number=referred_to_phone,
+                    referred_to_name=referred_to_name,
+                    company_name=company.company_name if company.company_name else COMPANY.full_name,
+                    referred_by_name=request.user.full_name,
+                    reason=reason,
+                    request_description=request_description,
+                )
 
 
-        return Response(
-            {
-                "message": "Referral sent successfully",
-                "referral_details": {
-                    "reference_id": referral.reference_id,
-                    "date": referral.created_at.strftime("%d %b %Y") if referral.created_at else None,
+            return Response(
+                {
+                    "message": "Referral sent successfully",
+                    "referral_details": {
+                        "reference_id": referral.reference_id,
+                        "date": referral.created_at.strftime("%d %b %Y") if referral.created_at else None,
+                    },
                 },
-            },
-            status=status.HTTP_201_CREATED,
-        )
+                status=status.HTTP_201_CREATED,
+            )
+        except Exception as e:
+            print(f"Error sending referral: {str(e)}")
+            return Response(
+                {"error": f"Error sending referral: {str(e)}"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
     
 
  
@@ -307,7 +337,6 @@ class AssignRepView(APIView):
         employee_id = data.get("employee_id")
         note = data.get("notes", "")
         referral_status = data.get("status", "in_progress")  # default to in_progress
-        print(data)
 
         # Validate referral
         try:
@@ -826,36 +855,43 @@ class CompleteReferralView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
-        referral_id = request.data.get("referral_id")
-        status_value = request.data.get("status", "completed")
-        if not referral_id:
-            return Response(
-                {"error": "referral_id is required"},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
         try:
-            referral = Referral.objects.get(id=referral_id)
-        except Referral.DoesNotExist:
-            return Response({"error": "Referral not found"}, status=status.HTTP_404_NOT_FOUND)
+            print(request.data)
+            referral_id = request.data.get("referral_id")
+            status_value = request.data.get("status", "completed")
+            if not referral_id:
+                return Response(
+                    {"error": "referral_id is required"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
 
-        # Check assignment exists
-        assignment = referral.assignments.last()
-        if not assignment:
-            return Response({"error": "Referral not assigned"}, status=status.HTTP_400_BAD_REQUEST)
+            try:
+                referral = Referral.objects.get(id=referral_id)
+            except Referral.DoesNotExist:
+                return Response({"error": "Referral not found"}, status=status.HTTP_404_NOT_FOUND)
 
-        # Check that the logged-in user is the assigned employee
-        if assignment.assigned_to != request.user:
-            return Response({"error": "You are not assigned to this referral"}, status=status.HTTP_403_FORBIDDEN)
+            # Check assignment exists
+            assignment = referral.assignments.last()
+            if not assignment:
+                return Response({"error": "Referral not assigned"}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Update both referral and assignment statuses
-        referral.status = status_value
-        referral.save()
-        assignment.status = status_value
-        assignment.save()
+            # Check that the logged-in user is the assigned employee
+            if assignment.assigned_to != request.user:
+                return Response({"error": "You are not assigned to this referral"}, status=status.HTTP_403_FORBIDDEN)
 
-        return Response({"message": "Referral marked as completed"}, status=status.HTTP_200_OK)
+            # Update both referral and assignment statuses
+            referral.status = status_value
+            referral.save()
+            assignment.status = status_value
+            assignment.save()
 
+            return Response({"message": "Referral marked as completed"}, status=status.HTTP_200_OK)
+        except Exception as e:
+            print(f"Error completing referral: {str(e)}")
+            return Response(
+                {"error": f"Failed to complete referral: {str(e)}"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
 
 
 

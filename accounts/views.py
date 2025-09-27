@@ -322,6 +322,12 @@ class SignupView(APIView):
                 print("Email already registered")
                 return Response({"error": "Email already registered"}, status=400)
 
+
+            if request.data.get("phone"):
+                if User.objects.filter(phone=request.data.get("phone")).exists():
+                    return Response({"error": "Phone number already registered"}, status=400)
+            
+
             user = User.objects.create_user(
                 email=request.data.get("email"), password=request.data.get("password"), full_name=request.data.get("name"), 
                 role="solo",
@@ -884,6 +890,7 @@ class UserInfoView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
+        
         user = User.objects.get(id=request.user.id)
         image_url = None
 
@@ -929,6 +936,7 @@ class UserInfoView(APIView):
         return Response(response_data, status=200)
 
 
+import json
 
 class UpdateUserView(APIView):
     permission_classes = [IsAuthenticated]
@@ -936,119 +944,58 @@ class UpdateUserView(APIView):
     def post(self, request):
         user = request.user
         data = request.data
-        
-        # Handle image upload separately since it's a file
-        if 'image' in request.FILES:
-            user.image = request.FILES['image']
+
+        print("Update payload:", data)
+
+
+        # Parse business_info properly
+        business_data = data.get("business_info", {})
+        if isinstance(business_data, str):
+            try:
+                business_data = json.loads(business_data)
+            except json.JSONDecodeError:
+                return Response(
+                    {"error": "Invalid business_info format"},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+        # Handle image upload separately
+        if "image" in request.FILES:
+            user.image = request.FILES["image"]
 
         if data.get("phone"):
-            if User.objects.filter(phone=data.get("phone")).exists():
+            if User.objects.exclude(id=user.id).filter(phone=data.get("phone")).exists():
                 return Response({"error": "Phone number already registered"}, status=400)
-        
-        # Fields that can be updated for User model (excluding image since we handle it above)
-        updatable_user_fields = ['full_name', 'phone']
-        
-        # Update user fields
+
+        # Updatable fields
+        updatable_user_fields = ["full_name", "phone"]
+
         for field in updatable_user_fields:
             if field in data:
                 setattr(user, field, data[field])
-        
+
         try:
             user.save()
-            
-            # Update business info if user has business_info and data is provided
-            business_data = data.get('business_info', {})
-            if hasattr(user, 'business_info') and business_data:
+
+            # Update Business Info if exists
+            if hasattr(user, "business_info") and business_data:
                 business_info = user.business_info
-                
-                # Fields that can be updated for BusinessInfo model
                 updatable_business_fields = [
-                    'company_name', 'industry', 'employees', 'biz_type',
-                    'address1', 'address2', 'city', 'post_code', 'website', 'us_state'
+                    "company_name", "industry", "employees", "biz_type",
+                    "address1", "address2", "city", "post_code", "website", "us_state"
                 ]
-                
                 for field in updatable_business_fields:
                     if field in business_data:
                         setattr(business_info, field, business_data[field])
-                
                 business_info.save()
-            
-            # Prepare response data
-            response_data = {
-                "message": "User updated successfully",
-                "user": {
-                    "id": user.id,
-                    "email": user.email,
-                    "full_name": user.full_name,
-                    "phone": user.phone,
-                    "image": generate_presigned_url(f"media/{user.image}", expires_in=3600) if user.image else None,
-                    "role": user.role,
-                    "is_verified": user.is_verified,
-                }
-            }
-            
-            # Include business info in response if it exists
-            if hasattr(user, 'business_info'):
-                business_info = user.business_info
-                response_data["business_info"] = {
-                    "company_name": business_info.company_name,
-                    "industry": business_info.industry,
-                    "employees": business_info.employees,
-                    "biz_type": business_info.biz_type,
-                    "address1": business_info.address1,
-                    "address2": business_info.address2,
-                    "city": business_info.city,
-                    "post_code": business_info.post_code,
-                    "website": business_info.website,
-                    "us_state": business_info.us_state,
-                }
-            
-            return Response(response_data, status=status.HTTP_200_OK)
-            
+
+            return Response({"message": "User updated successfully"}, status=200)
+
         except Exception as e:
-            print(str(e))
             return Response(
                 {"error": f"Failed to update user: {str(e)}"},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                status=500
             )
-
-
-    def get(self, request):
-        """Get current user profile"""
-        user = request.user
-        
-        response_data = {
-            "user": {
-                "id": user.id,
-                "email": user.email,
-                "full_name": user.full_name,
-                "phone": user.phone,
-                "image": user.image.url if user.image else None,
-                "role": user.role,
-                "is_verified": user.is_verified,
-                "is_paid": user.is_paid,
-            }
-        }
-        
-        # Include business info if it exists
-        if hasattr(user, 'business_info'):
-            business_info = user.business_info
-            response_data["business_info"] = {
-                "company_name": business_info.company_name,
-                "industry": business_info.industry,
-                "employees": business_info.employees,
-                "biz_type": business_info.biz_type,
-                "address1": business_info.address1,
-                "address2": business_info.address2,
-                "city": business_info.city,
-                "post_code": business_info.post_code,
-                "website": business_info.website,
-                "us_state": business_info.us_state,
-            }
-        
-        return Response(response_data, status=status.HTTP_200_OK)  
-
-
 
 
 # -------------------------
