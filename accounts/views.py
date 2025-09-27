@@ -170,47 +170,58 @@ class SignupView(APIView):
                     )
 
                     if not payment_details:
+                        # Send internal email with full error for your team
                         send_payment_failed_email(user.email, user.full_name, payment_error)
+
+                        # Delete user if needed
                         user.delete()
-                        return Response({"error": f"{payment_error}"}, status=500)
 
-                except stripe.error.CardError as e:
-                    # Since it's a decline, stripe.error.CardError will be caught
-                    err = e.error
-                    error_msg = f"CardError: {err.message}"
-                    user.delete()
-                    return Response({"error": error_msg}, status=400)
-
-                except stripe.error.RateLimitError:
-                    # Too many requests
-                    user.delete()
-                    return Response({"error": "Too many requests made to Stripe API"}, status=429)
-
-                except stripe.error.InvalidRequestError as e:
-                    # Invalid parameters were supplied
-                    user.delete()
-                    return Response({"error": f"{str(e)}"}, status=400)
-
-                except stripe.error.AuthenticationError:
-                    # Invalid API key
-                    user.delete()
-                    return Response({"error": "Stripe authentication failed"}, status=401)
-
-                except stripe.error.APIConnectionError:
-                    # Network communication failed
-                    user.delete()
-                    return Response({"error": "Network error while contacting Stripe"}, status=503)
-
-                except stripe.error.StripeError as e:
-                    # Display generic error
-                    user.delete()
-                    return Response({"error": f"{str(e)}"}, status=500)
+                        # Show polished message to end-user
+                        return Response(
+                            {"error": "Your payment could not be processed. Please check your card details or try another payment method."},
+                            status=400
+                        )
 
                 except Exception as e:
-                    print("Unexpected error:", str(e))
-                    # Something else happened unrelated to Stripe
+                    print("Stripe payment exception:", str(e))
                     user.delete()
-                    return Response({"error": f"Something Went Wrong"}, status=500)
+
+                    # Show only clean message to customer
+                    return Response(
+                        {"error": err.message or "Your card was declined. Please try a different card."},
+                        status=400
+                    )
+
+                # except stripe.error.RateLimitError:
+                #     # Too many requests
+                #     user.delete()
+                #     return Response({"error": "Too many requests made to Stripe API"}, status=429)
+
+                # except stripe.error.InvalidRequestError as e:
+                #     # Invalid parameters were supplied
+                #     user.delete()
+                #     return Response({"error": f"{str(e)}"}, status=400)
+
+                # except stripe.error.AuthenticationError:
+                #     # Invalid API key
+                #     user.delete()
+                #     return Response({"error": "Stripe authentication failed"}, status=401)
+
+                # except stripe.error.APIConnectionError:
+                #     # Network communication failed
+                #     user.delete()
+                #     return Response({"error": "Network error while contacting Stripe"}, status=503)
+
+                # except stripe.error.StripeError as e:
+                #     # Display generic error
+                #     user.delete()
+                #     return Response({"error": f"{str(e)}"}, status=500)
+
+                # except Exception as e:
+                #     print("Unexpected error:", str(e))
+                #     # Something else happened unrelated to Stripe
+                #     user.delete()
+                #     return Response({"error": f"Something Went Wrong"}, status=500)
 
                 
                
@@ -352,7 +363,84 @@ class SignupView(APIView):
             }, status=200)
 
 
+# else:
+#             print(request.data)
+#             phone = request.data.get("phone")
+#             user = None
 
+#             if request.data.get("referral_code"):
+
+#                 if not User.objects.filter(referral_code__iexact=request.data.get("referral_code")).exists():
+#                     return Response({"message": "Invalid referral code"}, status=status.HTTP_400_BAD_REQUEST)
+
+
+#             existing_user = User.objects.get(email=request.data.get("email"))
+
+#             if existing_user.is_to_be_registered:
+#                 existing_user.full_name = request.data.get("name")
+
+#                 if request.data.get("phone"):
+#                     if User.objects.filter(phone=request.data.get("phone")).exists():
+#                         return Response({"error": "Phone number already registered"}, status=400)
+#                     else:
+#                         existing_user.phone = phone
+
+#                 existing_user.set_password(request.data.get("password"))
+#                 existing_user.is_to_be_registered = False
+#                 existing_user.save()
+
+#                 tokens = get_tokens_for_user(user)
+
+
+#                 if request.data.get("referral_code"):
+#                     print("Referral code used:", request.data.get("referral_code"))
+#                     RU = ReferralUsage.objects.create(
+#                         referral_code=request.data.get("referral_code"),
+#                         used_by=user
+#                     )
+                    
+#                 print("Solo user created:", user.email)
+
+#                 return Response({
+#                     "message": "Solo user registered successfully",
+#                     "user": {"email": user.email, "name": user.full_name, "role": user.role},
+#                     "tokens": tokens
+#                 }, status=200)
+#             else:
+#                 if User.objects.filter(email=request.data.get("email")).exists():
+#                     print("Email already registered")
+#                     return Response({"error": "Email already registered"}, status=400)
+
+
+#                 if request.data.get("phone"):
+#                     if User.objects.filter(phone=request.data.get("phone")).exists():
+#                         return Response({"error": "Phone number already registered"}, status=400)
+                
+
+#                 user = User.objects.create_user(
+#                     email=request.data.get("email"), password=request.data.get("password"), full_name=request.data.get("name"), 
+#                     role="solo",
+#                     phone=request.data.get("phone"),
+#                 )
+
+
+#                 tokens = get_tokens_for_user(user)
+
+
+#                 if request.data.get("referral_code"):
+#                     print("Referral code used:", request.data.get("referral_code"))
+#                     RU = ReferralUsage.objects.create(
+#                         referral_code=request.data.get("referral_code"),
+#                         used_by=user
+#                     )
+                    
+#                 print("Solo user created:", user.email)
+
+#                 return Response({
+#                     "message": "Solo user registered successfully",
+#                     "user": {"email": user.email, "name": user.full_name, "role": user.role},
+#                     "tokens": tokens
+#                 }, status=200)
 
 class EmailPasswordLoginView(APIView):
     permission_classes = [AllowAny]
