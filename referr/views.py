@@ -6,10 +6,13 @@ from rest_framework import status
 
 # Django
 from django.db import models
+from django.db.models import Count, Sum
+from django.utils.timezone import now, timedelta
+
 
 # models
 from accounts.models import BusinessInfo
-from .models import Referral, ReferralAssignment
+from .models import Referral, ReferralAssignment, ReferralReward
 from accounts.models import User, BusinessInfo, FavoriteCompany
 
 # utils
@@ -29,6 +32,82 @@ def IMAGEURL(image_path):
             print("user.image", image_path)
             image_url = generate_presigned_url(f"media/{image_path}", expires_in=3600)
     return image_url
+
+
+
+class DashboardStatsView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        user = request.user
+
+        # Referrals created by this user
+        referrals_created = Referral.objects.filter(referred_by=user).count()
+
+        # Referrals accepted by companies
+        referrals_accepted = Referral.objects.filter(
+            referred_by=user, status="business_accepted"
+        ).count()
+
+        # Referrals completed
+        referrals_completed = Referral.objects.filter(
+            referred_by=user, status="completed"
+        ).count()
+
+        # Total points earned (from ReferralReward)
+        points_allocated = ReferralReward.objects.filter(user=user).aggregate(
+            total_points=Sum("points_awarded")
+        )["total_points"] or 0
+
+        # Conversion rate for cash value (example: 1 point = $1)
+        points_cashed_value = float(points_allocated) * 1.0
+
+        # Missed opportunities (cancelled or rejected)
+        missed_opportunity = Referral.objects.filter(
+            referred_by=user, status="cancelled"
+        ).count()
+
+        # ----------------------
+        # Graph data (last 7 days)
+        # ----------------------
+        today = now().date()
+        start_date = today - timedelta(days=6)
+
+        referrals_per_day = (
+            Referral.objects.filter(referred_by=user, created_at__date__gte=start_date)
+            .extra(select={"day": "date(created_at)"})
+            .values("day")
+            .annotate(count=Count("id"))
+            .order_by("day")
+        )
+
+        # Build dict {day: count}
+        daily_counts = {str(item["day"]): item["count"] for item in referrals_per_day}
+
+        graph_data = []
+        for i in range(7):
+            day = start_date + timedelta(days=i)
+            graph_data.append({
+                "date": day.strftime("%Y-%m-%d"),
+                "day": day.strftime("%a"),  # Sat, Sun, Mon...
+                "count": daily_counts.get(str(day), 0)
+            })
+
+        return Response(
+            {
+                "referrals_created": referrals_created,
+                "referrals_accepted": referrals_accepted,
+                "referrals_completed": referrals_completed,
+                "total_points_allocated": points_allocated,
+                "points_cashed_value": points_cashed_value,
+                "missed_opportunity": missed_opportunity,
+                "graph_data": graph_data,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+
 
 
 class ListCompaniesView(APIView):
