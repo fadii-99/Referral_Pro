@@ -195,6 +195,7 @@ class ChatRoomSerializer(serializers.ModelSerializer):
         return None
 
 
+
 class ChatRoomListSerializer(serializers.ModelSerializer):
     """Simplified chat room serializer for list views"""
     solo_user = UserBasicSerializer(read_only=True)

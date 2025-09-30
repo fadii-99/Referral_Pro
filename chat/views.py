@@ -6,7 +6,7 @@ from django.db.models import Q, Count, Max
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from datetime import timedelta
-
+import json
 from .models import ChatRoom, Message, MessageReadStatus, ChatParticipant
 from accounts.models import User, BusinessInfo
 from referr.models import Referral, ReferralAssignment
@@ -14,6 +14,11 @@ from .serializers import (
     ChatRoomSerializer, MessageSerializer, 
     ChatRoomListSerializer, MessageCreateSerializer
 )
+from django.db.models import Count, Q
+
+from django.core.serializers.json import DjangoJSONEncoder
+
+from utils.storage_backends import generate_presigned_url
 
 
 class ChatRoomListView(APIView):
@@ -21,43 +26,64 @@ class ChatRoomListView(APIView):
     List all chat rooms for the authenticated user
     """
     permission_classes = [IsAuthenticated]
-    
+
     def get(self, request):
         """Get all chat rooms for the current user"""
         user = request.user
-        
+
         # Get chat rooms based on user role
         if user.role == 'solo':
             chat_rooms = ChatRoom.objects.filter(solo_user=user)
-        elif user.role == 'rep':  # employee role
+        elif user.role == 'employee':  # employee role
             chat_rooms = ChatRoom.objects.filter(rep_user=user)
         elif user.role == 'company':
-            # Company can see their direct rooms and rooms of their reps
             chat_rooms = ChatRoom.objects.filter(
-                Q(company_user=user) | 
+                Q(company_user=user) |
                 Q(rep_user__parent_company=user)
             )
         else:
             chat_rooms = ChatRoom.objects.none()
-        
+
+
         # Add unread message count and last message info
         chat_rooms = chat_rooms.annotate(
             unread_count=Count(
-                'messages', 
-                filter=~Q(messages__read_statuses__user=user)
+                'messages',
+                filter=~Q(messages__sender=user) & ~Q(messages__read_statuses__user=user)
             )
-        ).select_related(
-            'solo_user', 'rep_user', 'company_user', 'referral'
-        ).prefetch_related(
-            'messages'
-        ).order_by('-last_message_at')
-        
-        serializer = ChatRoomListSerializer(chat_rooms, many=True, context={'request': request})
-        
-        return Response({
-            'success': True,
-            'chat_rooms': serializer.data
-        }, status=status.HTTP_200_OK)
+        )
+
+        # Custom response format
+        rooms_data = [
+            {
+                "room_id": room.room_id,
+                "room_type": room.room_type,
+                "chat_name": room.get_display_name(user),
+                "last_message": room.get_last_message_summary(),
+                "unread_count": room.get_unread_count(user),
+                "is_online": room.is_any_participant_online(exclude_user=user),
+                "is_active": room.is_active,
+                "created_at": room.created_at.isoformat(),
+                "updated_at": room.updated_at.isoformat(),
+                "referral_id": room.referral.reference_id if room.referral else None,
+                "image_url": (
+                    generate_presigned_url(f"media/{room.get_chat_image(user)}", expires_in=3600)
+                    if room.get_chat_image(user) else None
+                ),
+            }
+            for room in chat_rooms
+        ]
+
+        print(f"Chat rooms data in API: {rooms_data}")
+
+        return Response(
+            {
+                "success": True,
+                "chat_rooms": rooms_data,
+            },
+            status=status.HTTP_200_OK,
+        )
+
 
 
 class ChatRoomDetailView(APIView):
@@ -65,84 +91,108 @@ class ChatRoomDetailView(APIView):
     Get details of a specific chat room and its messages
     """
     permission_classes = [IsAuthenticated]
-    
+
     def get(self, request, room_id):
-        """Get chat room details and messages"""
-        print("roommmmscjbas ",room_id)
         try:
             chat_room = ChatRoom.objects.get(room_id=room_id)
-            
-            # Check if user can access this room
+
+            # Permission check
             if not chat_room.can_user_participate(request.user):
                 return Response({
-                    'success': False,
-                    'error': 'You do not have access to this chat room'
+                    "success": False,
+                    "error": "You do not have access to this chat room"
                 }, status=status.HTTP_403_FORBIDDEN)
 
-            print(f"Fetching messages for room {room_id} for user {request.user.id}")
-            # Get messages with pagination
-            page = int(request.GET.get('page', 1))
-            page_size = int(request.GET.get('page_size', 50))
+            # Pagination
+            page = int(request.GET.get("page", 1))
+            page_size = int(request.GET.get("page_size", 50))
             offset = (page - 1) * page_size
-            
-            messages = Message.objects.filter(chat_room=chat_room)\
-                .select_related('sender')\
-                .prefetch_related('read_statuses')\
-                .order_by('-created_at')[offset:offset + page_size]
-            
-            # Reverse to show oldest first
-            messages = list(reversed(messages))
-            
-            # Mark messages as read for current user
+
+            messages = (
+                Message.objects.filter(chat_room=chat_room)
+                .select_related("sender")
+                .prefetch_related("read_statuses")
+                .order_by("-created_at")[offset:offset + page_size]
+            )
+
+            messages = list(reversed(messages))  # oldest first
+
+            # Mark as read
             self._mark_messages_as_read(messages, request.user)
-            print(f"Marked {len(messages)} messages as read for user {request.user.id}")
-            # Serialize data
-            try:
-                room_serializer = ChatRoomSerializer(chat_room, context={'request': request})
-            except Exception as e:
-                print(f"Error serializing chat room: {str(e)}")
-            try:
-                message_serializer = MessageSerializer(messages, many=True, context={'request': request})
-            except Exception as e:
-                print(f"Error serializing chat room: {str(e)}")
-            
+
+            # Room info
+            room_data = {
+                "room_id": chat_room.room_id,
+                "room_type": chat_room.room_type,
+                "chat_name": chat_room.get_display_name(request.user),
+                "is_active": chat_room.is_active,
+                "created_at": chat_room.created_at.isoformat(),
+                "updated_at": chat_room.updated_at.isoformat(),
+                "referral_id": chat_room.referral.reference_id if chat_room.referral else None,
+                "image_url": (
+                    generate_presigned_url(f"media/{chat_room.get_chat_image(request.user)}", expires_in=3600)
+                    if chat_room.get_chat_image(request.user) else None
+                ),
+            }
+
+            # Messages
+            messages_data = [
+                {
+                    "id": msg.id,
+                    "room_id": chat_room.room_id,
+                    "sender": {
+                        "id": msg.sender.id,
+                        "name": msg.sender.full_name,
+                        "role": msg.sender.role,   # solo / rep / company
+                        "image_url": (
+                            generate_presigned_url(f"media/{msg.sender.image}", expires_in=3600)
+                            if msg.sender.image else None
+                        )
+                    },
+                    "content": msg.content,
+                    "message_type": msg.message_type,
+                    "created_at": msg.created_at.isoformat(),
+                    "is_read": msg.read_statuses.filter(user=request.user).exists(),
+                    "read_by": list(msg.read_statuses.values_list("user_id", flat=True))
+                }
+                for msg in messages
+            ]
+
             return Response({
-                'success': True,
-                'chat_room': room_serializer.data,
-                'messages': message_serializer.data,
-                'pagination': {
-                    'page': page,
-                    'page_size': page_size,
-                    'has_more': len(messages) == page_size
+                "success": True,
+                "chat_room": room_data,
+                "messages": messages_data,
+                "pagination": {
+                    "page": page,
+                    "page_size": page_size,
+                    "has_more": len(messages) == page_size
                 }
             }, status=status.HTTP_200_OK)
-            
-        except ChatRoom.DoesNotExist as e:
-            print(f"ChatRoom not found: {str(e)}")
+
+        except ChatRoom.DoesNotExist:
             return Response({
-                'success': False,
-                'error': 'Chat room not found'
+                "success": False,
+                "error": "Chat room not found"
             }, status=status.HTTP_404_NOT_FOUND)
-    
+
     def _mark_messages_as_read(self, messages, user):
         """Mark messages as read for the user"""
         message_ids = [msg.id for msg in messages]
         existing_reads = set(
             MessageReadStatus.objects.filter(
-                message_id__in=message_ids, 
-                user=user
-            ).values_list('message_id', flat=True)
+                message_id__in=message_ids, user=user
+            ).values_list("message_id", flat=True)
         )
-        
-        new_reads = []
-        for message in messages:
-            if message.id not in existing_reads and message.sender != user:
-                new_reads.append(
-                    MessageReadStatus(message=message, user=user)
-                )
-        
+
+        new_reads = [
+            MessageReadStatus(message=msg, user=user)
+            for msg in messages
+            if msg.id not in existing_reads and msg.sender != user
+        ]
+
         if new_reads:
             MessageReadStatus.objects.bulk_create(new_reads)
+
 
 
 from asgiref.sync import async_to_sync
@@ -251,17 +301,13 @@ class CreateChatRoomView(APIView):
             for user in participants:
                 mock_request = MockRequest(user)
                 serialized = ChatRoomListSerializer(
-                    [chat_room], 
-                    many=True, 
-                    context={'request': mock_request}
+                    [chat_room], many=True, context={'request': mock_request}
                 ).data
+                payload = json.loads(json.dumps(serialized, cls=DjangoJSONEncoder))
 
                 async_to_sync(channel_layer.group_send)(
                     f"chat_list_{user.id}",
-                    {
-                        "type": "chat_list_update",
-                        "chat_rooms": serialized,
-                    }
+                    {"type": "chat_list_update", "chat_rooms": payload}
                 )
         except Exception as e:
             print(f"Error in _send_chat_list_updates_for_new_room: {e}")
@@ -370,6 +416,9 @@ class CreateChatRoomView(APIView):
         return chat_rooms
 
 
+
+
+ 
 class SendMessageView(APIView):
     """
     Send a message in a chat room
@@ -456,12 +505,15 @@ class SendMessageView(APIView):
             class MockRequest:
                 def __init__(self, user):
                     self.user = user
-                    self.META = {'HTTP_HOST': 'localhost', 'wsgi.url_scheme': 'http'}
-                
+                    self.META = {
+                        'HTTP_HOST': 'thereferralpro.com',
+                        'wsgi.url_scheme': 'https'
+                    }
+
                 def build_absolute_uri(self, location=None):
-                    if location:
-                        return f"http://localhost{location}"
-                    return "http://localhost/"
+                    base = "https://thereferralpro.com"
+                    return f"{base}{location}" if location else base
+
             
             # Get all participants
             participants = chat_room.get_participants()
@@ -469,25 +521,22 @@ class SendMessageView(APIView):
             for participant in participants:
                 # Get updated chat room data for this specific user
                 user_chat_rooms = self._get_user_chat_rooms(participant)
-                
+
                 # Serialize the updated chat room list with proper mock request
                 mock_request = MockRequest(participant)
-                serializer = ChatRoomListSerializer(
-                    user_chat_rooms, 
-                    many=True, 
-                    context={'request': mock_request}
-                )
-                
-                # Send to user's chat list group
+                serialized = ChatRoomListSerializer(
+                    [chat_room], many=True, context={'request': mock_request}
+                ).data
+                payload = json.loads(json.dumps(serialized, cls=DjangoJSONEncoder))
+
+                # ❌ BUG: you wrote user.id, but there is no `user` variable here
                 async_to_sync(channel_layer.group_send)(
                     f"chat_list_{participant.id}",
-                    {
-                        "type": "chat_list_update",
-                        "chat_rooms": serializer.data
-                    }
+                    {"type": "chat_list_update", "chat_rooms": payload}
                 )
-                
+
                 print(f"Sent chat list update to user {participant.id}")
+
                 
         except Exception as e:
             print(f"Error sending chat list updates: {str(e)}")
@@ -497,7 +546,7 @@ class SendMessageView(APIView):
         """Get chat rooms for a specific user based on their role"""
         if user.role == 'solo':
             chat_rooms = ChatRoom.objects.filter(solo_user=user)
-        elif user.role == 'rep':  # employee role
+        elif user.role == 'employee':  # employee role
             chat_rooms = ChatRoom.objects.filter(rep_user=user)
         elif user.role == 'company':
             # Company can see their direct rooms and rooms of their reps
@@ -521,6 +570,9 @@ class SendMessageView(APIView):
         ).order_by('-last_message_at')
         
         return chat_rooms
+
+
+
 
 
 class ChatAnalyticsView(APIView):

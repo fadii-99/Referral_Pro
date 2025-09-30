@@ -84,6 +84,8 @@ class ChatRoom(models.Model):
     def get_display_name(self, viewer):
         """Get display name based on viewer's role"""
         if viewer == self.solo_user:
+            if hasattr(self.company_user, "business_info"):
+                return self.company_user.business_info.company_name
             return self.company_user.full_name
         elif viewer == self.rep_user or viewer == self.company_user:
             # Rep or company sees solo user name
@@ -97,6 +99,7 @@ class ChatRoom(models.Model):
             # Solo user sees company's image
             return self.company_user.get_image_url()
         elif viewer == self.rep_user or viewer == self.company_user:
+
             # Rep or company sees solo user's image
             return self.solo_user.get_image_url()
         else:
@@ -359,15 +362,14 @@ class Message(models.Model):
     
     @property
     def file_size_formatted(self):
-        """Return human-readable file size"""
-        if not self.file_size:
+        size = self.file_size
+        if size is None: 
             return None
-        
-        for unit in ['B', 'KB', 'MB', 'GB']:
-            if self.file_size < 1024.0:
-                return f"{self.file_size:.1f} {unit}"
-            self.file_size /= 1024.0
-        return f"{self.file_size:.1f} TB"
+        for unit in ['B','KB','MB','GB','TB']:
+            if size < 1024.0 or unit == 'TB':
+                return f"{size:.1f} {unit}"
+            size /= 1024.0
+
 
 
 class MessageReadStatus(models.Model):
