@@ -37,6 +37,7 @@ def send_referral_email(
     referred_by_name: str,
     reason: str = None,
     request_description: str = None,
+    referral_code: str = None,
 ):
     """
     Send an email notification when a referral is created.
@@ -51,6 +52,7 @@ def send_referral_email(
         "company_name": company_name,
         "referred_by_name": referred_by_name,
         "reason": reason,
+        "referral_code": referral_code,
         "request_description": request_description,
         "app_url": "https://thereferralpro.com/login",
     })

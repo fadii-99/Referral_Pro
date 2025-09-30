@@ -74,6 +74,9 @@ class User(AbstractBaseUser, PermissionsMixin):
     is_verified = models.BooleanField(default=False)
     is_passwordSet = models.BooleanField(default=False)
 
+    is_to_be_registered = models.BooleanField(default=False)
+
+
     objects = UserManager()
 
     USERNAME_FIELD = "email"

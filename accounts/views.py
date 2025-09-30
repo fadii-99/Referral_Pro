@@ -318,129 +318,130 @@ class SignupView(APIView):
         # -------------------
         # SOLO SIGNUP (unchanged)
         # -------------------
+        # else:
+        #     print(request.data)
+
+        #     if request.data.get("referral_code"):
+
+        #         if not User.objects.filter(referral_code__iexact=request.data.get("referral_code")).exists():
+        #             return Response({"message": "Invalid referral code"}, status=status.HTTP_400_BAD_REQUEST)
+                
+
+
+
+        #     if User.objects.filter(email=request.data.get("email")).exists():
+        #         print("Email already registered")
+        #         return Response({"error": "Email already registered"}, status=400)
+
+
+        #     if request.data.get("phone"):
+        #         if User.objects.filter(phone=request.data.get("phone")).exists():
+        #             return Response({"error": "Phone number already registered"}, status=400)
+            
+
+        #     user = User.objects.create_user(
+        #         email=request.data.get("email"), password=request.data.get("password"), full_name=request.data.get("name"), 
+        #         role="solo",
+        #         phone=request.data.get("phone"),
+        #     )
+        #     tokens = get_tokens_for_user(user)
+
+
+        #     if request.data.get("referral_code"):
+        #         print("Referral code used:", request.data.get("referral_code"))
+        #         RU = ReferralUsage.objects.create(
+        #             referral_code=request.data.get("referral_code"),
+        #             used_by=user
+        #         )
+                
+        #     print("Solo user created:", user.email)
+
+        #     return Response({
+        #         "message": "Solo user registered successfully",
+        #         "user": {"email": user.email, "name": user.full_name, "role": user.role},
+        #         "tokens": tokens
+        #     }, status=200)
+
+
         else:
-            print(request.data)
+            phone = request.data.get("phone")
+            user = None
 
             if request.data.get("referral_code"):
 
                 if not User.objects.filter(referral_code__iexact=request.data.get("referral_code")).exists():
                     return Response({"message": "Invalid referral code"}, status=status.HTTP_400_BAD_REQUEST)
+
+
+            existing_user = User.objects.get(email=request.data.get("email"))
+
+            if existing_user.is_to_be_registered:
+                try:
+                    print("Existing to-be-registered user found:", existing_user.email)
+                    existing_user.full_name = request.data.get("name")
+
+
+                    existing_user.set_password(request.data.get("password"))
+                    existing_user.is_to_be_registered = False
+                    existing_user.phone = phone
+                    existing_user.save()
+
+                    tokens = get_tokens_for_user(existing_user)
+
+
+                    if request.data.get("referral_code"):
+                        print("Referral code used:", request.data.get("referral_code"))
+                        RU = ReferralUsage.objects.create(
+                            referral_code=request.data.get("referral_code"),
+                            used_by=existing_user
+                        )
+                        
+                    print("Solo user created:", existing_user.email)
+
+                    return Response({
+                        "message": "Solo user registered successfully",
+                        "user": {"email": existing_user.email, "name": existing_user.full_name, "role": existing_user.role},
+                        "tokens": tokens
+                    }, status=200)
+                except Exception as e:
+                    print("Error registering to-be-registered user:", str(e))
+                    return Response({"error": "Failed to complete registration. Please try again."}, status=500)
+            else:
+                print("New solo user signup:", request.data)
+                if User.objects.filter(email=request.data.get("email")).exists():
+                    print("Email already registered")
+                    return Response({"error": "Email already registered"}, status=400)
+
+
+                if request.data.get("phone"):
+                    if User.objects.filter(phone=request.data.get("phone")).exists():
+                        return Response({"error": "Phone number already registered"}, status=400)
                 
 
+                # user = User.objects.create_user(
+                #     email=request.data.get("email"), password=request.data.get("password"), full_name=request.data.get("name"), 
+                #     role="solo",
+                #     phone=request.data.get("phone"),
+                # )
+                user = None
+
+                tokens = get_tokens_for_user(user)
 
 
-            if User.objects.filter(email=request.data.get("email")).exists():
-                print("Email already registered")
-                return Response({"error": "Email already registered"}, status=400)
-
-
-            if request.data.get("phone"):
-                if User.objects.filter(phone=request.data.get("phone")).exists():
-                    return Response({"error": "Phone number already registered"}, status=400)
-            
-
-            user = User.objects.create_user(
-                email=request.data.get("email"), password=request.data.get("password"), full_name=request.data.get("name"), 
-                role="solo",
-                phone=request.data.get("phone"),
-            )
-            tokens = get_tokens_for_user(user)
-
-
-            if request.data.get("referral_code"):
-                print("Referral code used:", request.data.get("referral_code"))
-                RU = ReferralUsage.objects.create(
-                    referral_code=request.data.get("referral_code"),
-                    used_by=user
-                )
-                
-            print("Solo user created:", user.email)
-
-            return Response({
-                "message": "Solo user registered successfully",
-                "user": {"email": user.email, "name": user.full_name, "role": user.role},
-                "tokens": tokens
-            }, status=200)
-
-
-# else:
-#             print(request.data)
-#             phone = request.data.get("phone")
-#             user = None
-
-#             if request.data.get("referral_code"):
-
-#                 if not User.objects.filter(referral_code__iexact=request.data.get("referral_code")).exists():
-#                     return Response({"message": "Invalid referral code"}, status=status.HTTP_400_BAD_REQUEST)
-
-
-#             existing_user = User.objects.get(email=request.data.get("email"))
-
-#             if existing_user.is_to_be_registered:
-#                 existing_user.full_name = request.data.get("name")
-
-#                 if request.data.get("phone"):
-#                     if User.objects.filter(phone=request.data.get("phone")).exists():
-#                         return Response({"error": "Phone number already registered"}, status=400)
-#                     else:
-#                         existing_user.phone = phone
-
-#                 existing_user.set_password(request.data.get("password"))
-#                 existing_user.is_to_be_registered = False
-#                 existing_user.save()
-
-#                 tokens = get_tokens_for_user(user)
-
-
-#                 if request.data.get("referral_code"):
-#                     print("Referral code used:", request.data.get("referral_code"))
-#                     RU = ReferralUsage.objects.create(
-#                         referral_code=request.data.get("referral_code"),
-#                         used_by=user
-#                     )
+                if request.data.get("referral_code"):
+                    print("Referral code used:", request.data.get("referral_code"))
+                    RU = ReferralUsage.objects.create(
+                        referral_code=request.data.get("referral_code"),
+                        used_by=user
+                    )
                     
-#                 print("Solo user created:", user.email)
+                print("Solo user created:", user.email)
 
-#                 return Response({
-#                     "message": "Solo user registered successfully",
-#                     "user": {"email": user.email, "name": user.full_name, "role": user.role},
-#                     "tokens": tokens
-#                 }, status=200)
-#             else:
-#                 if User.objects.filter(email=request.data.get("email")).exists():
-#                     print("Email already registered")
-#                     return Response({"error": "Email already registered"}, status=400)
-
-
-#                 if request.data.get("phone"):
-#                     if User.objects.filter(phone=request.data.get("phone")).exists():
-#                         return Response({"error": "Phone number already registered"}, status=400)
-                
-
-#                 user = User.objects.create_user(
-#                     email=request.data.get("email"), password=request.data.get("password"), full_name=request.data.get("name"), 
-#                     role="solo",
-#                     phone=request.data.get("phone"),
-#                 )
-
-
-#                 tokens = get_tokens_for_user(user)
-
-
-#                 if request.data.get("referral_code"):
-#                     print("Referral code used:", request.data.get("referral_code"))
-#                     RU = ReferralUsage.objects.create(
-#                         referral_code=request.data.get("referral_code"),
-#                         used_by=user
-#                     )
-                    
-#                 print("Solo user created:", user.email)
-
-#                 return Response({
-#                     "message": "Solo user registered successfully",
-#                     "user": {"email": user.email, "name": user.full_name, "role": user.role},
-#                     "tokens": tokens
-#                 }, status=200)
+                return Response({
+                    "message": "Solo user registered successfully",
+                    "user": {"email": user.email, "name": user.full_name, "role": user.role},
+                    "tokens": tokens
+                }, status=200)
 
 class EmailPasswordLoginView(APIView):
     permission_classes = [AllowAny]
@@ -991,6 +992,8 @@ class UserInfoView(APIView):
             except (ValueError, FileNotFoundError):
                 image_url = None
 
+
+
         # Base user response
         response_data = {
             "user": {
@@ -1002,6 +1005,7 @@ class UserInfoView(APIView):
                 "image": image_url,
                 "is_passwordSet": user.is_passwordSet,
                 "is_paid": user.is_paid,
+
             }
         }
 
@@ -1020,6 +1024,11 @@ class UserInfoView(APIView):
                 "website": business_info.website,
                 "us_state": business_info.us_state,
             }
+            response_data["user"]["company_name"] =  business_info.company_name
+
+
+        print(response_data)
+        
 
         return Response(response_data, status=200)
 

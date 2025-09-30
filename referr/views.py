@@ -267,7 +267,6 @@ class SendReferralView(APIView):
                 company = BusinessInfo.objects.get(user_id=company_id)
                 COMPANY = User.objects.get(id=company_id)
             except Exception as e:
-                print(f"Error fetching company: {str(e)}")
                 return Response({"error": "Company not found"}, status=status.HTTP_404_NOT_FOUND)
             
 
@@ -296,6 +295,7 @@ class SendReferralView(APIView):
                 referred_by_name=request.user.full_name,
                 reason=reason,
                 request_description=request_description,
+                referral_code=referral.referred_by.referral_code
             )
 
             if referred_to_phone:

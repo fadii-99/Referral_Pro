@@ -37,7 +37,6 @@ class Referral(models.Model):
     notes = models.TextField(blank=True, null=True)
     privacy_opted = models.BooleanField(default=False)
     permission_consent = models.BooleanField(default=False)
-    is_to_be_registered = models.BooleanField(default=False)
 
 
     status = models.CharField(
