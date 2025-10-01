@@ -1,30 +1,7 @@
-import json
-import logging
-from datetime import datetime
-import asyncio
-
-from channels.generic.websocket import AsyncWebsocketConsumer
-from channels.db import database_sync_to_async
-from django.apps import apps
-from django.contrib.auth import get_user_model
-User = get_user_model()
-logger = logging.getLogger(__name__)
-from chat.models import ChatRoom, ChatParticipant, Message, MessageReadStatus
-from utils.storage_backends import generate_presigned_url
-from django.utils import timezone
+  path('rooms/<str:room_id>/mark-read/', views.MarkMessagesReadView.as_view(), name='mark_messages_read'),
+    path('rooms/<str:room_id>/mark-all-read/', views.MarkAllMessagesReadView.as_view(), name='mark_all_messages_read'),
 
 
-# Custom JSON encoder that converts datetime → ISO string
-class DateTimeEncoder(json.JSONEncoder):
-    def default(self, obj):
-        if isinstance(obj, datetime):
-            return obj.isoformat()
-        return super().default(obj)
-
-class BaseJsonConsumer(AsyncWebsocketConsumer):
-    async def send_json(self, data):
-        print("Chat rooms data in consumer:", data)
-        await self.send(text_data=json.dumps(data, cls=DateTimeEncoder))
 
 
 # ---------------------------------------------
@@ -622,234 +599,289 @@ class ChatConsumer(BaseJsonConsumer):
 
 
 
-# ---------------------------------------------
-# ChatListConsumer
-# ---------------------------------------------
 
-class ChatListConsumer(BaseJsonConsumer):
+
+
+
+
+class MarkMessagesReadView(APIView):
     """
-    Sends the chat list in the SAME shape as the REST API:
-    {
-      "room_id", "room_type", "chat_name", "last_message",
-      "unread_count", "is_online", "is_active",
-      "created_at", "updated_at", "referral_id", "image_url"
-    }
+    Mark one or multiple messages as read
     """
-
-    # ---------- Public WS lifecycle ----------
-
-    async def connect(self):
-        print("🔌 WS connect attempt:", self.scope["path"])
-        self.user = self.scope.get("user")
-
-        if not self.user or self.user.is_anonymous:
-            print("⚠️ Unauthenticated user attempting to connect - closing connection")
-            await self.close(code=4001)
-            return
-
-        self.group_name = f"chat_list_{self.user.id}"
-        await self.channel_layer.group_add(self.group_name, self.channel_name)
-        await self.accept()
-
-        # Initial payload: API-shaped rooms list
-        rooms_data = await self._fetch_and_serialize_rooms_for_user(self.user)
-        user_profile = await self._get_user_profile_info()
-
-        await self.send(text_data=json.dumps({
-            "type": "chat_rooms_loaded",
-            "user_profile": user_profile,
-            "chat_rooms": rooms_data,
-            "timestamp": datetime.now().isoformat()
-        }, cls=DateTimeEncoder))
-
-        print(f"✅ WebSocket connection accepted. Group: {self.group_name}")
-
-    async def disconnect(self, close_code):
-        if hasattr(self, 'group_name'):
-            await self.channel_layer.group_discard(self.group_name, self.channel_name)
-            print(f"🔌 WebSocket disconnected from group: {self.group_name}")
-
-    # ---------- Incoming group event -> out to client ----------
-
-    async def chat_list_update(self, event):
-        """
-        Always normalize to API shape before sending to the client.
-
-        Supported inbound shapes from producers:
-        1) {"type":"chat_list_update", "room_ids":[...]}
-        2) {"type":"chat_list_update", "chat_rooms":[{"room_id": ...}, ...]}
-        3) {"type":"chat_list_update"}  -> fallback to full reload for this user
-        """
-        room_ids = event.get("room_ids")
-
-        if not room_ids and event.get("chat_rooms"):
-            # producer sent full objects; extract room_ids safely
-            objs = event["chat_rooms"]
-            room_ids = []
-            for o in objs:
-                if isinstance(o, dict) and "room_id" in o:
-                    room_ids.append(o["room_id"])
-
-        if room_ids:
-            rooms_data = await self._fetch_and_serialize_rooms_by_ids(room_ids, self.user)
-        else:
-            # fallback: reload all rooms for this user
-            rooms_data = await self._fetch_and_serialize_rooms_for_user(self.user)
-
-        await self.send_json({
-            "type": "chat_list_update",
-            "chat_rooms": rooms_data,
-            "timestamp": timezone.now().isoformat()
-        })
-
-    # ---------- Private helpers (DB + serialization) ----------
-
-    @database_sync_to_async
-    def _serialize_room_for_list(self, room, viewer):
-        """
-        Mirrors the REST API response format exactly.
-        """
-        # get_display_name(viewer), get_last_message_summary(), get_unread_count(viewer),
-        # is_any_participant_online(exclude_user=viewer), get_chat_image(viewer) are assumed
-        # methods on ChatRoom, as in your API code.
-        chat_image = room.get_chat_image(viewer)
-        image_url = generate_presigned_url(f"media/{chat_image}", expires_in=3600) if chat_image else None
-
-        return {
-            "room_id": room.room_id,
-            "room_type": room.room_type,
-            "chat_name": room.get_display_name(viewer),
-            "last_message": room.get_last_message_summary(),
-            "unread_count": room.get_unread_count(viewer),
-            "is_online": room.is_any_participant_online(exclude_user=viewer),
-            "is_active": room.is_active,
-            "created_at": room.created_at.isoformat(),
-            "updated_at": room.updated_at.isoformat(),
-            "referral_id": room.referral.reference_id if getattr(room, "referral", None) else None,
-            "image_url": image_url,
-        }
-
-    @database_sync_to_async
-    def _get_user_profile_info(self):
-        """Same shape you already send on connect."""
-        if not self.user or self.user.is_anonymous:
-            return {}
-        u = self.user
-        return {
-            "id": u.id,
-            "username": getattr(u, 'username', ''),
-            "email": getattr(u, 'email', ''),
-            "full_name": getattr(u, 'full_name', str(u)),
-            "role": getattr(u, 'role', ''),
-            "is_active": getattr(u, 'is_active', True),
-        }
-
-    @database_sync_to_async
-    def _query_rooms_for_user(self, viewer):
-        ChatRoom = apps.get_model("chat", "ChatRoom")
-
-        if viewer.role == 'solo':
-            qs = ChatRoom.objects.filter(solo_user=viewer)
-        elif viewer.role == 'employee':
-            qs = ChatRoom.objects.filter(rep_user=viewer)
-        elif viewer.role == 'company':
-            qs = ChatRoom.objects.filter(Q(company_user=viewer) | Q(rep_user__parent_company=viewer))
-        else:
-            qs = ChatRoom.objects.none()
-
-        qs = (qs
-              .select_related('solo_user', 'rep_user', 'company_user', 'referral')
-              .prefetch_related('messages', 'participants')
-              .distinct()
-              .order_by('-last_message_at'))
-        return list(qs)
-
-    @database_sync_to_async
-    def _query_rooms_by_ids(self, room_ids):
-        ChatRoom = apps.get_model("chat", "ChatRoom")
-        qs = (ChatRoom.objects.filter(room_id__in=room_ids)
-              .select_related('solo_user', 'rep_user', 'company_user', 'referral')
-              .prefetch_related('messages', 'participants'))
-        # Preserve input order if you care:
-        ordered = {r.room_id: r for r in qs}
-        return [ordered[rid] for rid in room_ids if rid in ordered]
-
-    async def _fetch_and_serialize_rooms_for_user(self, viewer):
-        rooms = await self._query_rooms_for_user(viewer)
-        out = []
-        for r in rooms:
-            out.append(await self._serialize_room_for_list(r, viewer))
-        return out
-
-    async def _fetch_and_serialize_rooms_by_ids(self, room_ids, viewer):
-        rooms = await self._query_rooms_by_ids(room_ids)
-        out = []
-        for r in rooms:
-            out.append(await self._serialize_room_for_list(r, viewer))
-        return out
-
-
-
-
-
-
-
-# ---------------------------------------------
-# NotificationConsumer
-# ---------------------------------------------
-class NotificationConsumer(AsyncWebsocketConsumer):
-    async def connect(self):
+    permission_classes = [IsAuthenticated]
+    
+    def post(self, request, room_id):
+        """Mark messages as read in a chat room"""
         try:
-            self.user_id = self.scope["url_route"]["kwargs"]["user_id"]
-            self.user = self.scope.get("user")
-
-            if not self.user or self.user.is_anonymous or str(self.user.id) != self.user_id:
-                await self.close(code=4001)
+            chat_room = ChatRoom.objects.get(room_id=room_id)
+            
+            # Check if user can participate in this room
+            if not chat_room.can_user_participate(request.user):
+                return Response({
+                    'success': False,
+                    'error': 'You do not have access to this chat room'
+                }, status=status.HTTP_403_FORBIDDEN)
+            
+            # Get message IDs from request
+            message_id = request.data.get('message_id')
+            message_ids = request.data.get('message_ids', [])
+            
+            # Support both single message and bulk marking
+            if message_id:
+                message_ids = [message_id]
+            
+            if not message_ids:
+                return Response({
+                    'success': False,
+                    'error': 'No message IDs provided'
+                }, status=status.HTTP_400_BAD_REQUEST)
+            
+            # Get messages that exist in this room and aren't sent by current user
+            messages = Message.objects.filter(
+                id__in=message_ids,
+                chat_room=chat_room
+            ).exclude(sender=request.user)
+            
+            # Get existing read statuses to avoid duplicates
+            existing_reads = set(
+                MessageReadStatus.objects.filter(
+                    message__in=messages,
+                    user=request.user
+                ).values_list("message_id", flat=True)
+            )
+            
+            # Create new read statuses for unread messages
+            new_reads = []
+            marked_message_ids = []
+            
+            for message in messages:
+                if message.id not in existing_reads:
+                    new_reads.append(MessageReadStatus(message=message, user=request.user))
+                    marked_message_ids.append(message.id)
+                else:
+                    # Already read, but include in response for consistency
+                    marked_message_ids.append(message.id)
+            
+            if new_reads:
+                MessageReadStatus.objects.bulk_create(new_reads)
+            
+            # Send real-time updates if any messages were newly marked as read
+            if new_reads:
+                self._send_read_status_updates(chat_room, marked_message_ids, request.user)
+            
+            return Response({
+                'success': True,
+                'message': f'Marked {len(marked_message_ids)} messages as read',
+                'marked_message_ids': marked_message_ids
+            }, status=status.HTTP_200_OK)
+            
+        except ChatRoom.DoesNotExist:
+            return Response({
+                'success': False,
+                'error': 'Chat room not found'
+            }, status=status.HTTP_404_NOT_FOUND)
+        except Exception as e:
+            return Response({
+                'success': False,
+                'error': f'Failed to mark messages as read: {str(e)}'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    
+    def _send_read_status_updates(self, chat_room, message_ids, user):
+        """Send real-time read status updates to WebSocket consumers"""
+        try:
+            from asgiref.sync import async_to_sync
+            from channels.layers import get_channel_layer
+            
+            channel_layer = get_channel_layer()
+            if not channel_layer:
                 return
+            
+            # Send read status update to chat room
+            async_to_sync(channel_layer.group_send)(
+                f"chat_{chat_room.room_id}",
+                {
+                    "type": "message_read_update",
+                    "room_id": chat_room.room_id,
+                    "message_ids": message_ids,
+                    "user_id": user.id,
+                    "user_name": user.full_name,
+                    "timestamp": timezone.now().isoformat(),
+                }
+            )
+            
+            # Send chat list updates to all participants (unread count changed)
+            participants = chat_room.get_participants()
+            for participant in participants:
+                # Get updated chat room data for this specific user
+                user_chat_rooms = self._get_user_chat_rooms_for_read_update(participant)
+                
+                # Create a proper mock request class
+                class MockRequest:
+                    def __init__(self, user):
+                        self.user = user
+                        self.META = {'HTTP_HOST': 'thereferralpro.com', 'wsgi.url_scheme': 'https'}
 
-            self.notification_group_name = f"notifications_{self.user_id}"
-            await self.channel_layer.group_add(self.notification_group_name, self.channel_name)
-            await self.accept()
+                    def build_absolute_uri(self, location=None):
+                        base = "https://thereferralpro.com"
+                        return f"{base}{location}" if location else base
 
-            logger.info(f"User {self.user_id} connected to notifications")
+                # Serialize the updated chat room list
+                mock_request = MockRequest(participant)
+                serialized = ChatRoomListSerializer(
+                    [chat_room], many=True, context={'request': mock_request}
+                ).data
+                payload = json.loads(json.dumps(serialized, cls=DjangoJSONEncoder))
+
+                async_to_sync(channel_layer.group_send)(
+                    f"chat_list_{participant.id}",
+                    {"type": "chat_list_update", "chat_rooms": payload}
+                )
+            
         except Exception as e:
-            logger.error(f"Error in notification connect: {str(e)}")
-            await self.close(code=4000)
+            print(f"Error sending read status updates: {str(e)}")
+    
+    def _get_user_chat_rooms_for_read_update(self, user):
+        """Get chat rooms for a specific user based on their role"""
+        if user.role == 'solo':
+            chat_rooms = ChatRoom.objects.filter(solo_user=user)
+        elif user.role == 'employee':
+            chat_rooms = ChatRoom.objects.filter(rep_user=user)
+        elif user.role == 'company':
+            chat_rooms = ChatRoom.objects.filter(
+                Q(company_user=user) | 
+                Q(rep_user__parent_company=user)
+            )
+        else:
+            chat_rooms = ChatRoom.objects.none()
+        
+        # Add unread message count and last message info
+        chat_rooms = chat_rooms.annotate(
+            unread_count=Count(
+                'messages', 
+                filter=~Q(messages__read_statuses__user=user)
+            )
+        ).select_related(
+            'solo_user', 'rep_user', 'company_user', 'referral'
+        ).prefetch_related(
+            'messages'
+        ).order_by('-last_message_at')
+        
+        return chat_rooms
 
-    async def disconnect(self, close_code):
+
+class MarkAllMessagesReadView(APIView):
+    """
+    Mark all messages in a chat room as read
+    """
+    permission_classes = [IsAuthenticated]
+    
+    def post(self, request, room_id):
+        """Mark all unread messages in a chat room as read"""
         try:
-            await self.channel_layer.group_discard(self.notification_group_name, self.channel_name)
-            logger.info(f"User {self.user_id} disconnected from notifications")
+            chat_room = ChatRoom.objects.get(room_id=room_id)
+            
+            # Check if user can participate in this room
+            if not chat_room.can_user_participate(request.user):
+                return Response({
+                    'success': False,
+                    'error': 'You do not have access to this chat room'
+                }, status=status.HTTP_403_FORBIDDEN)
+            
+            # Get all unread messages in this room (excluding user's own messages)
+            unread_messages = Message.objects.filter(
+                chat_room=chat_room
+            ).exclude(
+                sender=request.user
+            ).exclude(
+                read_statuses__user=request.user
+            )
+            
+            if not unread_messages.exists():
+                return Response({
+                    'success': True,
+                    'message': 'No unread messages to mark',
+                    'marked_count': 0
+                }, status=status.HTTP_200_OK)
+            
+            # Create read statuses for all unread messages
+            new_reads = [
+                MessageReadStatus(message=msg, user=request.user)
+                for msg in unread_messages
+            ]
+            
+            MessageReadStatus.objects.bulk_create(new_reads)
+            marked_message_ids = [msg.id for msg in unread_messages]
+            
+            # Send real-time updates
+            self._send_read_status_updates_for_all_messages(chat_room, marked_message_ids, request.user)
+            
+            return Response({
+                'success': True,
+                'message': f'Marked {len(marked_message_ids)} messages as read',
+                'marked_count': len(marked_message_ids),
+                'marked_message_ids': marked_message_ids
+            }, status=status.HTTP_200_OK)
+            
+        except ChatRoom.DoesNotExist:
+            return Response({
+                'success': False,
+                'error': 'Chat room not found'
+            }, status=status.HTTP_404_NOT_FOUND)
         except Exception as e:
-            logger.error(f"Error in notification disconnect: {str(e)}")
-
-    async def receive(self, text_data):
+            return Response({
+                'success': False,
+                'error': f'Failed to mark all messages as read: {str(e)}'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    
+    def _send_read_status_updates_for_all_messages(self, chat_room, message_ids, user):
+        """Send real-time read status updates when all messages are marked as read"""
         try:
-            _ = json.loads(text_data)
-            # No-op for now
-        except json.JSONDecodeError:
-            logger.error("Invalid JSON received in notifications")
+            from asgiref.sync import async_to_sync
+            from channels.layers import get_channel_layer
+            
+            channel_layer = get_channel_layer()
+            if not channel_layer:
+                return
+            
+            # Send read status update to chat room
+            async_to_sync(channel_layer.group_send)(
+                f"chat_{chat_room.room_id}",
+                {
+                    "type": "message_read_update",
+                    "room_id": chat_room.room_id,
+                    "message_ids": message_ids,
+                    "user_id": user.id,
+                    "user_name": user.full_name,
+                    "timestamp": timezone.now().isoformat(),
+                    "mark_all": True  # Flag to indicate this was a "mark all" operation
+                }
+            )
+            
+            # Send chat list updates to all participants (unread count changed to 0 for this user)
+            participants = chat_room.get_participants()
+            for participant in participants:
+                # Create a proper mock request class
+                class MockRequest:
+                    def __init__(self, user):
+                        self.user = user
+                        self.META = {'HTTP_HOST': 'thereferralpro.com', 'wsgi.url_scheme': 'https'}
+
+                    def build_absolute_uri(self, location=None):
+                        base = "https://thereferralpro.com"
+                        return f"{base}{location}" if location else base
+
+                # Serialize the updated chat room list
+                mock_request = MockRequest(participant)
+                serialized = ChatRoomListSerializer(
+                    [chat_room], many=True, context={'request': mock_request}
+                ).data
+                payload = json.loads(json.dumps(serialized, cls=DjangoJSONEncoder))
+
+                async_to_sync(channel_layer.group_send)(
+                    f"chat_list_{participant.id}",
+                    {"type": "chat_list_update", "chat_rooms": payload}
+                )
+            
         except Exception as e:
-            logger.error(f"Error in notification receive: {str(e)}")
+            print(f"Error sending read status updates for all messages: {str(e)}")
 
-    async def new_message_notification(self, event):
-        await self.send(text_data=json.dumps(event))
-
-    async def referral_notification(self, event):
-        await self.send(text_data=json.dumps(event))
-
-# ---------------------------------------------
-# Utility: Send notification to user
-# ---------------------------------------------
-@database_sync_to_async
-def send_notification_to_user(user_id, notification_type, data):
-    from channels.layers import get_channel_layer
-    import asyncio
-
-    channel_layer = get_channel_layer()
-    asyncio.create_task(
-        channel_layer.group_send(
-            f"notifications_{user_id}",
-            {"type": notification_type, **data},
-        )
-    )

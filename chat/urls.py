@@ -13,6 +13,8 @@ urlpatterns = [
     
     # Messaging
     path('rooms/<str:room_id>/messages/', views.SendMessageView.as_view(), name='send_message'),
+    path('rooms/<str:room_id>/mark-read/', views.MarkMessagesReadView.as_view(), name='mark_messages_read'),
+    path('rooms/<str:room_id>/mark-all-read/', views.MarkAllMessagesReadView.as_view(), name='mark_all_messages_read'),
     
     # File uploads
     path('upload/media/', MediaUploadView.as_view(), name='upload_media'),

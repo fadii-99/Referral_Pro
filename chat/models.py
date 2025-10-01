@@ -208,8 +208,11 @@ class Message(models.Model):
     message_type = models.CharField(max_length=10, choices=MESSAGE_TYPES, default='text')
     content = models.TextField(blank=True)  # Optional for media messages
     
-    # File attachments with comprehensive support
-    file_url = models.URLField(blank=True, null=True)
+    # File attachments with comprehensive support - store path like user profile images
+    from utils.storage_backends import MediaStorage
+    media_storage = MediaStorage()
+    
+    attachment = models.FileField(upload_to="chat_files/", storage=media_storage, null=True, blank=True)
     file_name = models.CharField(max_length=255, blank=True, null=True)
     file_size = models.PositiveIntegerField(blank=True, null=True)  # Size in bytes
     file_type = models.CharField(max_length=100, blank=True, null=True)  # MIME type
@@ -283,7 +286,7 @@ class Message(models.Model):
                 "sender_role": getattr(self.sender, 'role', ''),
                 "message_type": self.message_type,
                 "timestamp": self.created_at.isoformat(),
-                "file_url": self.file_url,
+                "file_url": self.get_file_url(),  # Use the method to get presigned URL
                 "file_name": self.file_name,
                 "file_size": self.file_size,
                 "file_type": self.file_type,
@@ -369,7 +372,83 @@ class Message(models.Model):
             if size < 1024.0 or unit == 'TB':
                 return f"{size:.1f} {unit}"
             size /= 1024.0
+    
+    def get_file_url(self):
+        """Get the presigned URL for the attachment file"""
+        if self.attachment:
+            from utils.storage_backends import generate_presigned_url
+            return generate_presigned_url(f"media/{self.attachment}", expires_in=3600)
+        return None
+    
+    def get_attachments_data(self):
+        """Get all attachments data for this message"""
+        attachments = []
+        
+        # Add primary attachment if exists
+        if self.attachment:
+            attachments.append({
+                'file_url': self.get_file_url(),
+                'file_name': self.file_name,
+                'file_size': self.file_size,
+                'file_type': self.file_type,
+                'file_size_formatted': self.file_size_formatted
+            })
+        
+        # Add additional attachments
+        for attachment in self.additional_attachments.all():
+            attachments.append({
+                'file_url': attachment.get_file_url(),
+                'file_name': attachment.file_name,
+                'file_size': attachment.file_size,
+                'file_type': attachment.file_type,
+                'file_size_formatted': attachment.file_size_formatted
+            })
+            
+        return attachments
 
+
+class MessageAttachment(models.Model):
+    """
+    Model for multiple file attachments per message
+    """
+    from utils.storage_backends import MediaStorage
+    media_storage = MediaStorage()
+    
+    message = models.ForeignKey(Message, on_delete=models.CASCADE, related_name='additional_attachments')
+    attachment = models.FileField(upload_to="chat_files/", storage=media_storage)
+    file_name = models.CharField(max_length=255)
+    file_size = models.PositiveIntegerField()  # Size in bytes
+    file_type = models.CharField(max_length=100)  # MIME type
+    
+    # Media-specific metadata
+    duration = models.PositiveIntegerField(blank=True, null=True)  # For audio/video (seconds)
+    thumbnail_url = models.URLField(blank=True, null=True)  # For videos/images
+    dimensions = models.JSONField(blank=True, null=True)  # {"width": 1920, "height": 1080}
+    
+    created_at = models.DateTimeField(auto_now_add=True)
+    
+    class Meta:
+        ordering = ['created_at']
+        
+    def __str__(self):
+        return f"Attachment: {self.file_name} for message {self.message.id}"
+    
+    def get_file_url(self):
+        """Get the presigned URL for the attachment file"""
+        if self.attachment:
+            from utils.storage_backends import generate_presigned_url
+            return generate_presigned_url(f"media/{self.attachment}", expires_in=3600)
+        return None
+    
+    @property
+    def file_size_formatted(self):
+        size = self.file_size
+        if size is None: 
+            return None
+        for unit in ['B','KB','MB','GB','TB']:
+            if size < 1024.0 or unit == 'TB':
+                return f"{size:.1f} {unit}"
+            size /= 1024.0
 
 
 class MessageReadStatus(models.Model):

@@ -16,6 +16,8 @@ class MediaStorage(S3Boto3Storage):
 
 
 import boto3
+import uuid
+import mimetypes
 from django.conf import settings
 
 def generate_presigned_url(key, expires_in=3600):
@@ -38,3 +40,50 @@ def generate_presigned_url(key, expires_in=3600):
         },
         ExpiresIn=expires_in,
     )
+
+def upload_file_to_s3(file, folder='chat_files'):
+    """
+    Upload a file to S3 and return file details.
+    :param file: The file object from request.FILES
+    :param folder: The folder in S3 bucket to store the file
+    :return: Dict with file_url, file_name, file_size, file_type
+    """
+    # Generate a unique filename
+    file_ext = file.name.split('.')[-1] if '.' in file.name else ''
+    unique_filename = f"{uuid.uuid4().hex}.{file_ext}" if file_ext else f"{uuid.uuid4().hex}"
+    
+    # Define the S3 key (path)
+    key = f"{folder}/{unique_filename}"
+    
+    # Get or guess content type
+    content_type = getattr(file, 'content_type', None)
+    if not content_type:
+        content_type = mimetypes.guess_type(file.name)[0] or 'application/octet-stream'
+    
+    # Upload to S3
+    s3_client = boto3.client(
+        "s3",
+        aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
+        aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
+        region_name=settings.AWS_S3_REGION_NAME,
+    )
+    
+    s3_client.upload_fileobj(
+        file,
+        settings.AWS_STORAGE_BUCKET_NAME,
+        key,
+        ExtraArgs={
+            'ContentType': content_type,
+        }
+    )
+    
+    # Generate URL
+    file_url = generate_presigned_url(key)
+    
+    return {
+        'file_url': file_url,
+        'file_name': file.name,
+        'file_size': file.size,
+        'file_type': content_type,
+        's3_key': key
+    }

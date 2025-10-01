@@ -36,12 +36,16 @@ class MessageSerializer(serializers.ModelSerializer):
     sender = UserBasicSerializer(read_only=True)
     is_read = serializers.SerializerMethodField()
     read_count = serializers.SerializerMethodField()
+    file_url = serializers.SerializerMethodField()
+    file_size_formatted = serializers.SerializerMethodField()
+    attachments = serializers.SerializerMethodField()
 
     class Meta:
         model = Message
         fields = [
             'id', 'sender', 'message_type', 'content',
-            'file_url', 'file_name', 'file_size',
+            'file_url', 'file_name', 'file_size', 'file_size_formatted', 'file_type',
+            'thumbnail_url', 'duration', 'dimensions', 'attachments',
             'is_edited', 'edited_at', 'created_at',
             'is_read', 'read_count',
         ]
@@ -54,6 +58,25 @@ class MessageSerializer(serializers.ModelSerializer):
 
     def get_read_count(self, obj):
         return obj.read_statuses.count()
+        
+    def get_file_url(self, obj):
+        """Get presigned URL for file access"""
+        return obj.get_file_url()
+    
+    def get_file_size_formatted(self, obj):
+        """Format file size to be human-readable"""
+        if obj.file_size is None:
+            return None
+            
+        size = obj.file_size
+        for unit in ['B', 'KB', 'MB', 'GB', 'TB']:
+            if size < 1024.0 or unit == 'TB':
+                return f"{size:.1f} {unit}"
+            size /= 1024.0
+    
+    def get_attachments(self, obj):
+        """Get all attachments for this message"""
+        return obj.get_attachments_data()
 
 
 
@@ -61,27 +84,36 @@ class MessageSerializer(serializers.ModelSerializer):
 class MessageCreateSerializer(serializers.ModelSerializer):
     """Serializer for creating chat messages with media support"""
     reply_to_id = serializers.IntegerField(required=False, write_only=True)
+    file = serializers.FileField(required=False, write_only=True)
+    # Remove the ListField approach as it doesn't work well with multipart form data
+    # We'll handle multiple files directly in the view
     
     class Meta:
         model = Message
         fields = [
-            'message_type', 'content', 'file_url', 'file_name', 'file_size',
-            'file_type', 'duration', 'thumbnail_url', 'dimensions', 'reply_to_id'
+            'message_type', 'content', 'attachment', 'file_name', 'file_size',
+            'file_type', 'duration', 'thumbnail_url', 'dimensions', 'reply_to_id',
+            'file'
         ]
     
     def validate(self, data):
         """Validate message data"""
         message_type = data.get('message_type', 'text')
         content = data.get('content', '').strip()
-        file_url = data.get('file_url')
+        attachment = data.get('attachment')
+        file = data.get('file')
         
-        # Text messages must have content
-        if message_type == 'text' and not content:
-            raise serializers.ValidationError("Text messages cannot be empty")
+        # Get files from context (passed from view)
+        files = self.context.get('files', [])
         
-        # Media messages must have file_url
-        if message_type in ['image', 'video', 'audio', 'document', 'file'] and not file_url:
-            raise serializers.ValidationError(f"{message_type.title()} messages require a file")
+        # Text messages must have content (unless they have attachments)
+        if message_type == 'text' and not content and not file and not files:
+            raise serializers.ValidationError("Text messages cannot be empty unless they have attachments")
+        
+        # Media messages must have file, files, or attachment
+        if message_type in ['image', 'video', 'audio', 'document', 'file']:
+            if not file and not files and not attachment:
+                raise serializers.ValidationError(f"{message_type.title()} messages require at least one file")
         
         return data
     
@@ -101,16 +133,70 @@ class MessageCreateSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         """Create message with proper context"""
+        from .models import MessageAttachment
+        
         chat_room = self.context.get('chat_room')
         sender = self.context.get('sender')
         reply_to = validated_data.pop('reply_to_id', None)
         
-        return Message.objects.create(
+        # Handle single file upload
+        file = validated_data.pop('file', None)
+        
+        # Get multiple files from context (passed from view)
+        files = self.context.get('files', [])
+        
+        # Combine single file with multiple files
+        all_files = []
+        if file:
+            all_files.append(file)
+        if files:
+            all_files.extend(files)
+        
+        # If we have files, determine message type from the first file if not specified
+        if all_files and 'message_type' not in validated_data:
+            first_file = all_files[0]
+            content_type = getattr(first_file, 'content_type', '')
+            if content_type.startswith('image/'):
+                validated_data['message_type'] = 'image'
+            elif content_type.startswith('video/'):
+                validated_data['message_type'] = 'video'
+            elif content_type.startswith('audio/'):
+                validated_data['message_type'] = 'audio'
+            else:
+                validated_data['message_type'] = 'file'
+        
+        # Handle first file as primary attachment
+        if all_files:
+            first_file = all_files[0]
+            validated_data['attachment'] = first_file
+            validated_data['file_name'] = first_file.name
+            validated_data['file_size'] = first_file.size
+            validated_data['file_type'] = getattr(first_file, 'content_type', 'application/octet-stream')
+        
+        # Create the message
+        message = Message.objects.create(
             chat_room=chat_room,
             sender=sender,
             reply_to=reply_to,
             **validated_data
         )
+        
+        # Create additional attachments for remaining files
+        if len(all_files) > 1:
+            additional_attachments = []
+            for additional_file in all_files[1:]:
+                attachment = MessageAttachment(
+                    message=message,
+                    attachment=additional_file,
+                    file_name=additional_file.name,
+                    file_size=additional_file.size,
+                    file_type=getattr(additional_file, 'content_type', 'application/octet-stream')
+                )
+                additional_attachments.append(attachment)
+            
+            MessageAttachment.objects.bulk_create(additional_attachments)
+        
+        return message
 
 
 class ChatParticipantSerializer(serializers.ModelSerializer):
