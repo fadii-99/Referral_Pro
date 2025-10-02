@@ -973,12 +973,44 @@ class SendResetPasswordView(APIView):
 # ==========================================
 # ==========================================
 
-
+import json
+from rest_framework_simplejwt.tokens import UntypedToken
+from rest_framework_simplejwt.exceptions import InvalidToken, TokenError
+from datetime import datetime
 
 class UserInfoView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
+
+        auth_header = request.META.get('HTTP_AUTHORIZATION')
+        if auth_header and auth_header.startswith('Bearer '):
+            token = auth_header.split(' ')[1]
+            try:
+                # Decode the token to get payload
+                
+                untyped_token = UntypedToken(token)
+                exp_timestamp = untyped_token.payload.get('exp')
+                
+                if exp_timestamp:
+                    exp_datetime = datetime.fromtimestamp(exp_timestamp)
+                    print(f"Token expires at: {exp_datetime}")
+                    print(f"Token expires at (UTC): {datetime.utcfromtimestamp(exp_timestamp)}")
+                    
+                    # Calculate remaining time
+                    current_time = datetime.utcnow()
+                    remaining_time = exp_datetime - current_time
+                    print(f"Time remaining: {remaining_time}")
+                    
+                else:
+                    print("No expiry time found in token")
+                    
+            except (InvalidToken, TokenError) as e:
+                print(f"Invalid token: {e}")
+            except Exception as e:
+                print(f"Error decoding token: {e}")
+        else:
+            print("No authorization header or invalid format")
         
         user = User.objects.get(id=request.user.id)
         image_url = None
@@ -1033,12 +1065,13 @@ class UserInfoView(APIView):
         return Response(response_data, status=200)
 
 
-import json
 
 class UpdateUserView(APIView):
     permission_classes = [IsAuthenticated]
 
+
     def post(self, request):
+        
         user = request.user
         data = request.data
 

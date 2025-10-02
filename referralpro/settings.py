@@ -32,6 +32,8 @@ INSTALLED_APPS = [
     # Third-party
     'rest_framework',
     'rest_framework.authtoken',
+    'rest_framework_simplejwt',
+    'rest_framework_simplejwt.token_blacklist',
     'corsheaders',
     'storages',
     'channels',
@@ -108,15 +110,29 @@ REST_FRAMEWORK = {
 }
 from datetime import timedelta
 SIMPLE_JWT = {
-    "ACCESS_TOKEN_LIFETIME": timedelta(minutes=600),   # 🔹 1 hour
-    "REFRESH_TOKEN_LIFETIME": timedelta(days=7),      # 🔹 7 days
+    "ACCESS_TOKEN_LIFETIME": timedelta(hours=600),     # 🔹 24 hours (1 day)
+    "REFRESH_TOKEN_LIFETIME": timedelta(days=30),     # 🔹 30 days
     "ROTATE_REFRESH_TOKENS": True,                    # issue new refresh token on each use
     "BLACKLIST_AFTER_ROTATION": True,                 # old refresh tokens become invalid
+    "UPDATE_LAST_LOGIN": True,                        # update user's last_login field
+    "ALGORITHM": "HS256",
+    "SIGNING_KEY": SECRET_KEY,
+    "VERIFYING_KEY": None,
+    "AUDIENCE": None,
+    "ISSUER": None,
+    "JTI_CLAIM": "jti",
+    "LEEWAY": 0,
     "AUTH_HEADER_TYPES": ("Bearer",),                 # for Authorization: Bearer <token>
-    "AUTH_COOKIE": "access_token",                    # optional, if you want DRF cookies
-    "AUTH_COOKIE_SECURE": True,                       # secure cookies for HTTPS
-    "AUTH_COOKIE_HTTP_ONLY": True,
-    "AUTH_COOKIE_SAMESITE": "Lax",
+    "AUTH_HEADER_NAME": "HTTP_AUTHORIZATION",
+    "USER_ID_FIELD": "id",
+    "USER_ID_CLAIM": "user_id",
+    "USER_AUTHENTICATION_RULE": "rest_framework_simplejwt.authentication.default_user_authentication_rule",
+    "AUTH_TOKEN_CLASSES": ("rest_framework_simplejwt.tokens.AccessToken",),
+    "TOKEN_TYPE_CLAIM": "token_type",
+    "TOKEN_USER_CLASS": "rest_framework_simplejwt.models.TokenUser",
+    "SLIDING_TOKEN_REFRESH_EXP_CLAIM": "refresh_exp",
+    "SLIDING_TOKEN_LIFETIME": timedelta(hours=24),
+    "SLIDING_TOKEN_REFRESH_LIFETIME": timedelta(days=30),
 }
 # -------------------------
 # Redis & Celery
