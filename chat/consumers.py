@@ -104,7 +104,7 @@ class ChatConsumer(BaseJsonConsumer):
             elif message_type == "typing":
                 await self.handle_typing_indicator(data)
             elif message_type == "mark_read":
-                await self.handle_mark_read(data)  # ✅ supports mark_all now
+                await self.handle_mark_read(data)
             else:
                 logger.warning(f"Unknown message type: {message_type}")
 
@@ -254,65 +254,45 @@ class ChatConsumer(BaseJsonConsumer):
             await self.send_json(event)
 
     async def handle_mark_read(self, data):
-        """
-        Payloads supported:
-
-        1) Mark specific messages:
-           { "type": "mark_read", "message_ids": [1,2,3] }
-
-        2) Mark all in room:
-           { "type": "mark_read", "mark_all": true }
-
-        3) Mark all up to a message id (useful for scrolled viewport):
-           { "type": "mark_read", "mark_all": true, "upto_message_id": 1234 }
-        """
         try:
-            # Support legacy single message_id format
             message_id = data.get("message_id")
             message_ids = data.get("message_ids", [])
-            if message_id and not message_ids:
+            
+            # Support both single message and bulk marking
+            if message_id:
                 message_ids = [message_id]
-
-            mark_all = bool(data.get("mark_all"))
-            upto_message_id = data.get("upto_message_id")  # optional int
-
-            if not (mark_all or message_ids):
-                await self.send_json({"type": "error", "message": "Provide message_ids or mark_all"})
+            
+            if not message_ids:
+                await self.send_json({"type": "error", "message": "No message IDs provided for mark read"})
                 return
-
-            # authorization check via room membership
-            can_join = await self.can_user_join_room()
-            if not can_join:
-                await self.send_json({"type": "error", "message": "Not allowed in this room"})
-                return
-
-            if mark_all:
-                marked_ids = await self.mark_all_messages_read(upto_message_id)
-            else:
-                marked_ids = await self.mark_messages_read(message_ids)
-
-            if marked_ids:
+            
+            # Mark messages as read
+            marked_messages = await self.mark_messages_read(message_ids)
+            
+            if marked_messages:
                 # Broadcast read status update to all room participants
                 await self.channel_layer.group_send(
                     self.room_group_name,
                     {
                         "type": "message_read_update",
                         "room_id": self.room_id,
-                        "message_ids": marked_ids,
+                        "message_ids": marked_messages,
                         "user_id": self.user.id,
                         "user_name": self.user.full_name,
                         "timestamp": timezone.now().isoformat(),
                     }
                 )
-                # Update chat list unread counters
+                
+                # Send chat list updates to all participants (unread count changed)
                 await self._send_chat_list_updates_for_read_status()
-
-            await self.send_json({
-                "type": "messages_marked_read",
-                "message_ids": marked_ids,
-                "success": True
-            })
-
+                
+                # Acknowledge to sender
+                await self.send_json({
+                    "type": "messages_marked_read",
+                    "message_ids": marked_messages,
+                    "success": True
+                })
+            
         except Exception as e:
             logger.error(f"Error marking message as read: {str(e)}")
             await self.send_json({"type": "error", "message": "Failed to mark message as read"})
@@ -348,7 +328,10 @@ class ChatConsumer(BaseJsonConsumer):
         msg_obj["type"] = "chat_message"
         await self.send_json(msg_obj)
 
-    # ✅ consolidate to a single definition - removed duplicate here
+
+    async def typing_indicator(self, event):
+        if event["user_id"] != self.user.id:
+            await self.send_json(event)
 
     async def user_joined(self, event):
         if event["user_id"] != self.user.id:
@@ -478,93 +461,50 @@ class ChatConsumer(BaseJsonConsumer):
 
     @database_sync_to_async
     def mark_messages_read(self, message_ids):
-        """
-        Mark selected messages as read for self.user within this room.
-        Skips:
-          - messages from the current user (your own messages are never 'unread')
-          - receipts that already exist (idempotent)
-        Returns list of message IDs considered read after this call.
-        """
+        """Mark multiple messages as read and return successfully marked message IDs"""
         Message = apps.get_model("chat", "Message")
         MessageReadStatus = apps.get_model("chat", "MessageReadStatus")
         ChatRoom = apps.get_model("chat", "ChatRoom")
-
+        
         try:
             chat_room = ChatRoom.objects.get(room_id=self.room_id)
-
-            # Only messages in this room, not by me
-            messages = (Message.objects
-                        .filter(id__in=message_ids, chat_room=chat_room)
-                        .exclude(sender=self.user)
-                        .only('id'))
-
-            existing = set(
-                MessageReadStatus.objects
-                .filter(message__in=messages, user=self.user)
-                .values_list("message_id", flat=True)
+            
+            # Get messages that exist in this room and aren't sent by current user
+            messages = Message.objects.filter(
+                id__in=message_ids,
+                chat_room=chat_room
+            ).exclude(sender=self.user)
+            
+            # Get existing read statuses to avoid duplicates
+            existing_reads = set(
+                MessageReadStatus.objects.filter(
+                    message__in=messages,
+                    user=self.user
+                ).values_list("message_id", flat=True)
             )
-
-            to_create = []
-            result_ids = []
-            for m in messages:
-                result_ids.append(m.id)
-                if m.id not in existing:
-                    to_create.append(MessageReadStatus(message=m, user=self.user))
-
-            if to_create:
-                MessageReadStatus.objects.bulk_create(to_create, ignore_conflicts=True)
-
-            return result_ids
-
+            
+            # Create new read statuses for unread messages
+            new_reads = []
+            marked_message_ids = []
+            
+            for message in messages:
+                if message.id not in existing_reads:
+                    new_reads.append(MessageReadStatus(message=message, user=self.user))
+                    marked_message_ids.append(message.id)
+                else:
+                    # Already read, but include in response for consistency
+                    marked_message_ids.append(message.id)
+            
+            if new_reads:
+                MessageReadStatus.objects.bulk_create(new_reads)
+            
+            return marked_message_ids
+            
         except ChatRoom.DoesNotExist:
             logger.error(f"ChatRoom {self.room_id} not found when marking messages as read")
             return []
         except Exception as e:
             logger.error(f"Error in mark_messages_read: {str(e)}")
-            return []
-
-    @database_sync_to_async
-    def mark_all_messages_read(self, upto_message_id=None):
-        """
-        Mark ALL messages in this room as read for self.user.
-        Optional: only up to and including `upto_message_id`.
-        """
-        Message = apps.get_model("chat", "Message")
-        MessageReadStatus = apps.get_model("chat", "MessageReadStatus")
-        ChatRoom = apps.get_model("chat", "ChatRoom")
-
-        try:
-            chat_room = ChatRoom.objects.get(room_id=self.room_id)
-
-            qs = Message.objects.filter(chat_room=chat_room).exclude(sender=self.user)
-            if upto_message_id:
-                qs = qs.filter(id__lte=upto_message_id)
-
-            msg_ids = list(qs.values_list('id', flat=True))
-            if not msg_ids:
-                return []
-
-            existing = set(
-                MessageReadStatus.objects
-                .filter(message_id__in=msg_ids, user=self.user)
-                .values_list("message_id", flat=True)
-            )
-
-            to_create = [
-                MessageReadStatus(message_id=mid, user=self.user)
-                for mid in msg_ids
-                if mid not in existing
-            ]
-            if to_create:
-                MessageReadStatus.objects.bulk_create(to_create, ignore_conflicts=True)
-
-            return msg_ids
-
-        except ChatRoom.DoesNotExist:
-            logger.error(f"ChatRoom {self.room_id} not found for mark_all_messages_read")
-            return []
-        except Exception as e:
-            logger.error(f"Error in mark_all_messages_read: {str(e)}")
             return []
 
     @database_sync_to_async

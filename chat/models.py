@@ -7,18 +7,17 @@ from referr.models import Referral
 class ChatRoom(models.Model):
     """
     Chat room model that handles different types of conversations:
-    1. Rep-Solo chat (assigned rep/employee chats with referred solo)
+    1. Rep-Solo chat (assigned rep chats with referred solo)
     2. Company-Solo chat (when biz_type='individual', company directly chats with solo)
     """
     ROOM_TYPES = [
-        ('rep_solo', 'Rep/Employee to Solo'),
+        ('rep_solo', 'Rep to Solo'),
         ('company_solo', 'Company to Solo'),
     ]
     
     room_id = models.CharField(max_length=100, unique=True)
     referral = models.ForeignKey(Referral, on_delete=models.CASCADE, related_name='chat_rooms')
-    # ✅ CHANGE: enforce choices so downstream code can rely on valid types
-    room_type = models.CharField(max_length=20, choices=ROOM_TYPES, null=True, blank=True)
+    room_type = models.CharField(max_length=20, null=True, blank=True)
     
     # Participants
     solo_user = models.ForeignKey(
@@ -33,8 +32,7 @@ class ChatRoom(models.Model):
         related_name='rep_chat_rooms',
         null=True, 
         blank=True,
-        # ✅ CHANGE: allow either 'rep' or 'employee' to be the assigned handler
-        limit_choices_to={'role__in': ['rep', 'employee']}
+        limit_choices_to={'role': 'rep'}
     )
     company_user = models.ForeignKey(
         User, 
@@ -64,17 +62,19 @@ class ChatRoom(models.Model):
     def can_user_participate(self, user):
         """Check if a user can participate in this chat room"""
         if user == self.solo_user:
+            print("Solo user can participate")
             return True
         if user == self.company_user:
+            print("Company user can participate")
             return True
-        if self.rep_user and user == self.rep_user:
+        if user == self.rep_user:
+            print("Rep user can participate")
             return True
         
-        # ✅ CHANGE: company oversight over their reps' rooms
-        # supports cases where rep_user is employed by company_user
-        # (expects a FK or attribute `parent_company` on user; you already use it elsewhere)
-        if user.role == 'company' and self.rep_user and getattr(self.rep_user, 'parent_company_id', None) == user.id:
-            return True
+        # Company can oversee their reps' conversations
+        # if user.role == 'company' and self.rep_user and self.rep_user.parent_company == user:
+        #     return True
+        print("User cannot participate")
             
         return False
     
