@@ -455,23 +455,25 @@ class EmailPasswordLoginView(APIView):
         typee = request.data.get("type")
 
 
-
         if not email or not password:
             return Response({"error": "Email and password required"}, status=400)
         
-        if typee == "web":
-            role = "company"
+        # if typee == "web":
+        #     role = "company"
         
 
         try:
             user = User.objects.get(email=email)
+            print(user.email, user.role, user.is_active)
             if user.check_password(password):
                 # Authentication successful, set user as active
                 user.is_active = True
                 user.save()
             else:
+                print("Invalid password for user:", email)
                 return Response({"error": "Invalid credentials"}, status=401)
         except User.DoesNotExist:
+            print("No user found with email:", email)
             return Response({"error": "Invalid credentials"}, status=401)
         
         if role == "rep":
@@ -479,6 +481,7 @@ class EmailPasswordLoginView(APIView):
 
 
         if role != user.role:
+            print("Role mismatch: expected", role, "but user role is", user.role)
             return Response({"error": "Invalid credentials"}, status=401)
         
         tokens = get_tokens_for_user(user)
@@ -486,7 +489,13 @@ class EmailPasswordLoginView(APIView):
         user.save()
 
 
-        if user.role == "company":
+        if user.role == "admin":
+            print("Admin login")
+            response = Response({
+                "user": {"email": user.email, "name": user.full_name, "role": user.role},
+                "tokens": tokens
+            }, status=200)
+        elif user.role == "company":
             response = Response({
                 "user": {"email": user.email, "name": user.full_name, "role": user.role, "is_paid": user.is_paid},
                 "tokens": tokens

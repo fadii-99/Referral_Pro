@@ -327,7 +327,7 @@ class Message(models.Model):
                 chat_rooms = chat_rooms.annotate(
                     unread_count=Count(
                         'messages', 
-                        filter=~Q(messages__read_statuses__user=participant)
+                        filter=~Q(messages__sender=participant) & ~Q(messages__read_statuses__user=participant)
                     )
                 ).select_related(
                     'solo_user', 'rep_user', 'company_user', 'referral'

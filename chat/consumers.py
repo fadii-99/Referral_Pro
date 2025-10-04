@@ -116,20 +116,24 @@ class ChatConsumer(BaseJsonConsumer):
 
     async def handle_chat_message(self, data):
         try:
-            content = data.get("message", "").strip()
+            # Support both 'message' and 'content' keys from frontend
+            content = (data.get("message") or data.get("content") or "").strip()
             message_type = data.get("message_type", "text")
             file_data = data.get("file_data", {})
             reply_to_id = data.get("reply_to")
 
-            # Content validation - text messages need content, but file/image messages don't require it
-            if message_type == "text" and not content:
-                await self.send_json({"type": "error", "message": "Text messages cannot be empty"})
-                return
-
-            # File data validation for media messages
-            if message_type in ["image", "document", "file"] and not file_data.get("file_url"):
-                await self.send_json({"type": "error", "message": f"{message_type.title()} messages require file data"})
-                return
+            # Validation logic:
+            # - Text messages must have content
+            # - Media messages (image/document/file/video/audio) need either content OR file_data
+            if message_type == "text":
+                if not content:
+                    await self.send_json({"type": "error", "message": "Text messages cannot be empty"})
+                    return
+            elif message_type in ["image", "document", "file", "video", "audio"]:
+                # Media messages need file data OR content (caption)
+                if not file_data.get("file_url") and not content:
+                    await self.send_json({"type": "error", "message": f"{message_type.title()} messages require file data or content"})
+                    return
 
             can_send = await self.can_user_send_message()
             if not can_send:
@@ -185,7 +189,6 @@ class ChatConsumer(BaseJsonConsumer):
                 if getattr(self.user, "image", None) else None
             )
 
-            print(user_image_url)
 
             if is_typing:
                 # Broadcast START only if not already active
@@ -270,15 +273,20 @@ class ChatConsumer(BaseJsonConsumer):
             marked_messages = await self.mark_messages_read(message_ids)
             
             if marked_messages:
+                # Get the last (highest) message ID for efficient bulk updates
+                last_message_id = max(marked_messages) if marked_messages else None
+                
                 # Broadcast read status update to all room participants
                 await self.channel_layer.group_send(
                     self.room_group_name,
                     {
                         "type": "message_read_update",
                         "room_id": self.room_id,
-                        "message_ids": marked_messages,
                         "user_id": self.user.id,
                         "user_name": self.user.full_name,
+                        "message_ids": marked_messages,
+                        "last_read_message_id": last_message_id,
+                        "read_at": timezone.now().isoformat(),
                         "timestamp": timezone.now().isoformat(),
                     }
                 )
@@ -347,10 +355,13 @@ class ChatConsumer(BaseJsonConsumer):
             await self.send_json({
                 "type": "message_read_update",
                 "room_id": event["room_id"],
-                "message_ids": event["message_ids"],
                 "user_id": event["user_id"],
                 "user_name": event["user_name"],
-                "timestamp": event["timestamp"]
+                "message_ids": event.get("message_ids", []),
+                "last_read_message_id": event.get("last_read_message_id"),
+                "read_at": event.get("read_at"),
+                "timestamp": event["timestamp"],
+                "mark_all": event.get("mark_all", False),
             })
 
     async def chat_list_update(self, event):
@@ -590,6 +601,22 @@ class ChatConsumer(BaseJsonConsumer):
             .get(id=message_id)
         )
 
+        # Get participants for proper read state calculation
+        participants = list(msg.chat_room.get_participants())
+        participant_user_ids = set([p.id for p in participants])
+        
+        # Get users who read this message (excluding sender)
+        read_user_ids = set(msg.read_statuses.values_list("user_id", flat=True))
+        read_user_ids.discard(msg.sender_id)
+        
+        # For the viewer: is this message read by me?
+        is_read_by_me = (msg.sender_id == viewer.id) or msg.read_statuses.filter(user_id=viewer.id).exists()
+        
+        # For the sender: did others read it?
+        others_count = len(participant_user_ids - {msg.sender_id})
+        read_by_others_count = len(read_user_ids)
+        read_by_all_others = (others_count > 0 and read_by_others_count == others_count)
+
         sender_image_url = (
             generate_presigned_url(f"media/{msg.sender.image}", expires_in=3600)
             if getattr(msg.sender, "image", None) else None
@@ -608,12 +635,22 @@ class ChatConsumer(BaseJsonConsumer):
             "content": msg.content,
             "message_type": msg.message_type,
             "created_at": msg.created_at.isoformat(),
-            "is_read": msg.read_statuses.filter(user=viewer).exists(),
+            
+            # Viewer perspective
+            "is_read_by_me": is_read_by_me,
+            
+            # Sender perspective (for showing "others read" indicators)
+            "read_by_user_ids": list(read_user_ids),
+            "read_by_others_count": read_by_others_count,
+            "read_by_all_others": read_by_all_others,
+            
+            # Legacy fields for backwards compatibility
+            "is_read": is_read_by_me,
             "read_by": list(msg.read_statuses.values_list("user_id", flat=True)),
         }
         
         # Add file-related fields for media messages
-        if msg.message_type in ['image', 'video', 'audio', 'document', 'file']:
+        if msg.message_type in ['image', 'document', 'file']:
             message_data.update({
                 "file_url": msg.get_file_url(),  # Use the method to get presigned URL
                 "file_name": msg.file_name,

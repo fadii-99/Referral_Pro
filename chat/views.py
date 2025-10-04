@@ -21,6 +21,77 @@ from django.core.serializers.json import DjangoJSONEncoder
 from utils.storage_backends import generate_presigned_url
 
 
+def serialize_message_with_read_state(msg, viewer, participants):
+    """
+    Serialize message with dual read perspectives:
+    - is_read_by_me: for the viewer (recipient perspective)
+    - read_by_*: for the sender (showing who else read their message)
+    """
+    # Get participant user IDs (excluding sender)
+    participant_user_ids = set([p.id for p in participants])
+    
+    # Get users who read this message (excluding sender)
+    read_user_ids = set(msg.read_statuses.values_list("user_id", flat=True))
+    read_user_ids.discard(msg.sender_id)
+    
+    # For the viewer: is this message read by me?
+    is_read_by_me = (msg.sender_id == viewer.id) or msg.read_statuses.filter(user_id=viewer.id).exists()
+    
+    # For the sender: did others read it?
+    others_count = len(participant_user_ids - {msg.sender_id})
+    read_by_others_count = len(read_user_ids)
+    read_by_all_others = (others_count > 0 and read_by_others_count == others_count)
+    
+    # Get sender image URL
+    sender_image_url = (
+        generate_presigned_url(f"media/{msg.sender.image}", expires_in=3600)
+        if msg.sender.image else None
+    )
+    
+    # Base message data
+    message_data = {
+        "id": msg.id,
+        "room_id": msg.chat_room.room_id,
+        "sender": {
+            "id": msg.sender.id,
+            "name": msg.sender.full_name,
+            "role": msg.sender.role,
+            "image_url": sender_image_url,
+        },
+        "content": msg.content,
+        "message_type": msg.message_type,
+        "created_at": msg.created_at.isoformat(),
+        
+        # Viewer perspective
+        "is_read_by_me": is_read_by_me,
+        
+        # Sender perspective (for showing "others read" indicators)
+        "read_by_user_ids": list(read_user_ids),
+        "read_by_others_count": read_by_others_count,
+        "read_by_all_others": read_by_all_others,
+        
+        # Legacy field for backwards compatibility
+        "is_read": is_read_by_me,
+        "read_by": list(msg.read_statuses.values_list("user_id", flat=True))
+    }
+    
+    # Add file/attachment information for media messages
+    if msg.message_type in ['image', 'document', 'file']:
+        message_data.update({
+            "file_url": msg.get_file_url(),
+            "file_name": msg.file_name,
+            "file_size": msg.file_size,
+            "file_size_formatted": msg.file_size_formatted,
+            "file_type": msg.file_type,
+            "duration": msg.duration,
+            "thumbnail_url": msg.thumbnail_url,
+            "dimensions": msg.dimensions,
+            "attachments": msg.get_attachments_data()
+        })
+    
+    return message_data
+
+
 class ChatRoomListView(APIView):
     """
     List all chat rooms for the authenticated user
@@ -122,6 +193,9 @@ class ChatRoomDetailView(APIView):
             if newly_marked_ids:
                 self._send_read_status_updates_for_detail_view(chat_room, newly_marked_ids, request.user)
 
+            # Get participants for proper read state serialization
+            participants = chat_room.get_participants()
+
             # Room info
             room_data = {
                 "room_id": chat_room.room_id,
@@ -137,43 +211,11 @@ class ChatRoomDetailView(APIView):
                 ),
             }
 
-            # Messages with file/attachment information
-            messages_data = []
-            for msg in messages:
-                message_data = {
-                    "id": msg.id,
-                    "room_id": chat_room.room_id,
-                    "sender": {
-                        "id": msg.sender.id,
-                        "name": msg.sender.full_name,
-                        "role": msg.sender.role,   # solo / rep / company
-                        "image_url": (
-                            generate_presigned_url(f"media/{msg.sender.image}", expires_in=3600)
-                            if msg.sender.image else None
-                        )
-                    },
-                    "content": msg.content,
-                    "message_type": msg.message_type,
-                    "created_at": msg.created_at.isoformat(),
-                    "is_read": msg.read_statuses.filter(user=request.user).exists(),
-                    "read_by": list(msg.read_statuses.values_list("user_id", flat=True))
-                }
-                
-                # Add file/attachment information for media messages
-                if msg.message_type in ['image', 'document', 'file']:
-                    message_data.update({
-                        "file_url": msg.get_file_url(),  # Get presigned URL for primary attachment
-                        "file_name": msg.file_name,
-                        "file_size": msg.file_size,
-                        "file_size_formatted": msg.file_size_formatted,
-                        "file_type": msg.file_type,
-                        "duration": msg.duration,
-                        "thumbnail_url": msg.thumbnail_url,
-                        "dimensions": msg.dimensions,
-                        "attachments": msg.get_attachments_data()  # Get ALL attachments (including multiple files)
-                    })
-                
-                messages_data.append(message_data)
+            # Messages with dual read perspectives
+            messages_data = [
+                serialize_message_with_read_state(msg, request.user, participants)
+                for msg in messages
+            ]
 
 
 
@@ -230,15 +272,20 @@ class ChatRoomDetailView(APIView):
             if not channel_layer:
                 return
             
+            # Get the last (highest) message ID for efficient bulk updates
+            last_message_id = max(message_ids) if message_ids else None
+            
             # Send read status update to chat room
             async_to_sync(channel_layer.group_send)(
                 f"chat_{chat_room.room_id}",
                 {
                     "type": "message_read_update",
                     "room_id": chat_room.room_id,
-                    "message_ids": message_ids,
                     "user_id": user.id,
                     "user_name": user.full_name,
+                    "message_ids": message_ids,
+                    "last_read_message_id": last_message_id,
+                    "read_at": timezone.now().isoformat(),
                     "timestamp": timezone.now().isoformat(),
                 }
             )
@@ -499,7 +546,7 @@ class CreateChatRoomView(APIView):
         chat_rooms = chat_rooms.annotate(
             unread_count=Count(
                 'messages', 
-                filter=~Q(messages__read_statuses__user=user)
+                filter=~Q(messages__sender=user) & ~Q(messages__read_statuses__user=user)
             )
         ).select_related(
             'solo_user', 'rep_user', 'company_user', 'referral'
@@ -706,7 +753,7 @@ class SendMessageView(APIView):
         chat_rooms = chat_rooms.annotate(
             unread_count=Count(
                 'messages', 
-                filter=~Q(messages__read_statuses__user=user)
+                filter=~Q(messages__sender=user) & ~Q(messages__read_statuses__user=user)
             )
         ).select_related(
             'solo_user', 'rep_user', 'company_user', 'referral'
@@ -873,15 +920,20 @@ class MarkMessagesReadView(APIView):
             if not channel_layer:
                 return
             
+            # Get the last (highest) message ID for efficient bulk updates
+            last_message_id = max(message_ids) if message_ids else None
+            
             # Send read status update to chat room
             async_to_sync(channel_layer.group_send)(
                 f"chat_{chat_room.room_id}",
                 {
                     "type": "message_read_update",
                     "room_id": chat_room.room_id,
-                    "message_ids": message_ids,
                     "user_id": user.id,
                     "user_name": user.full_name,
+                    "message_ids": message_ids,
+                    "last_read_message_id": last_message_id,
+                    "read_at": timezone.now().isoformat(),
                     "timestamp": timezone.now().isoformat(),
                 }
             )
@@ -935,7 +987,7 @@ class MarkMessagesReadView(APIView):
         chat_rooms = chat_rooms.annotate(
             unread_count=Count(
                 'messages', 
-                filter=~Q(messages__read_statuses__user=user)
+                filter=~Q(messages__sender=user) & ~Q(messages__read_statuses__user=user)
             )
         ).select_related(
             'solo_user', 'rep_user', 'company_user', 'referral'
@@ -958,11 +1010,11 @@ class MarkAllMessagesReadView(APIView):
             chat_room = ChatRoom.objects.get(room_id=room_id)
             
             # Check if user can participate in this room
-            # if not chat_room.can_user_participate(request.user):
-            #     return Response({
-            #         'success': False,
-            #         'error': 'You do not have access to this chat room'
-            #     }, status=status.HTTP_403_FORBIDDEN)
+            if not chat_room.can_user_participate(request.user):
+                return Response({
+                    'success': False,
+                    'error': 'You do not have access to this chat room'
+                }, status=status.HTTP_403_FORBIDDEN)
             
             # Get all unread messages in this room (excluding user's own messages)
             unread_messages = Message.objects.filter(
@@ -1020,15 +1072,20 @@ class MarkAllMessagesReadView(APIView):
             if not channel_layer:
                 return
             
+            # Use cutoff pointer for efficient bulk updates
+            last_message_id = max(message_ids) if message_ids else None
+            
             # Send read status update to chat room
             async_to_sync(channel_layer.group_send)(
                 f"chat_{chat_room.room_id}",
                 {
                     "type": "message_read_update",
                     "room_id": chat_room.room_id,
-                    "message_ids": message_ids,
                     "user_id": user.id,
                     "user_name": user.full_name,
+                    "message_ids": message_ids,
+                    "last_read_message_id": last_message_id,
+                    "read_at": timezone.now().isoformat(),
                     "timestamp": timezone.now().isoformat(),
                     "mark_all": True  # Flag to indicate this was a "mark all" operation
                 }
