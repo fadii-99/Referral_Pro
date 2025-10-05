@@ -23,4 +23,9 @@ urlpatterns = [
     
     # Analytics
     path('analytics/', views.ChatAnalyticsView.as_view(), name='chat_analytics'),
+    
+    # Notifications
+    path('notifications/', views.NotificationListView.as_view(), name='notification_list'),
+    path('notifications/mark-read/', views.MarkNotificationReadView.as_view(), name='mark_notification_read'),
+    path('notifications/stats/', views.NotificationStatsView.as_view(), name='notification_stats'),
 ]

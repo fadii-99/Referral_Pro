@@ -45,6 +45,7 @@ INSTALLED_APPS = [
     'rewards',
     'chat',
     'super',
+    "activity",
 ]
 
 # -------------------------

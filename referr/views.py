@@ -21,6 +21,7 @@ from utils.email_service import send_app_download_email, send_referral_email
 from utils.twilio_service import TwilioService
 from utils.storage_backends import generate_presigned_url
 from utils.notify import notify_users
+from utils.activity import log_activity
 
 
 def IMAGEURL(image_path):
@@ -290,6 +291,21 @@ class SendReferralView(APIView):
                 permission_consent=permission_consent,
             )
 
+            log_activity(
+                event="send_referral",
+                actor=request.user,
+                referral=referral,
+                title="Referral sent",
+                body=f"{request.user.full_name} referred {referred_to_user.full_name or referred_to_email} to {COMPANY.full_name or company.company_name}",
+                meta={
+                    "referred_to_email": referred_to_email,
+                    "urgency": urgency_level,
+                    "service_type": reason,
+                    "permission_consent": bool(permission_consent),
+                    "privacy_opted": bool(privacy),
+                },
+            )
+
             send_referral_email(
                 referred_to_email=referred_to_email,
                 referred_to_name=referred_to_name,
@@ -316,7 +332,7 @@ class SendReferralView(APIView):
                 "referral_id": referral.id,
                 "reference_id": referral.reference_id,
                 "title": "New referral",
-                "message": f"{request.user.full_name} referred {referred_to_user.full_name} to {COMPANY.full_name}",
+                "message": f"{request.user.full_name} referred {referred_to_user.full_name} to {company.company_name if company.company_name else COMPANY.full_name}",
                 "actors": {
                     "referred_by_id": request.user.id,
                     "referred_to_id": referred_to_user.id,
@@ -401,10 +417,26 @@ class AssignRepView(APIView):
         referral_obj.company_approval = True if referral_status == "accept" else False
         referral_obj.save()
 
+        log_activity(
+            event="rep_assigned",
+            actor=request.user,                 # whoever triggered the assign (company admin etc.)
+            referral=referral_obj,
+            subject_user=employee,              # the rep being assigned
+            title="Rep assigned",
+            body=f"{employee.full_name if employee else '—'} assigned to referral {referral_obj.reference_id}",
+            meta={
+                "assignment_id": assignment.id,
+                "status": referral_obj.status,
+                "company_approval": referral_obj.company_approval,
+                "note": note,
+            },
+        )
+
 
         if referral_status == "accept":
             payload = {
                 "event": "referral.company_accepted",
+                "unread": True,
                 "referral_id": referral_obj.id,
                 "reference_id": referral_obj.reference_id,
                 "title": "Company accepted your referral",
@@ -427,6 +459,7 @@ class AssignRepView(APIView):
 
         payload = {
             "event": "referral.rep_assigned",
+            "unread": True,
             "referral_id": referral_obj.id,
             "reference_id": referral_obj.reference_id,
             "title": "You were assigned a referral",
@@ -916,8 +949,18 @@ class SendAcceptView(APIView):
         referral.status = "Friend opted in" if approval else "cancelled"
         referral.save()
 
+        log_activity(
+            event="friend_optin" if approval else "friend_optin",  # keep single event; you can split if you like
+            actor=referral.referred_to,   # friend is the actor
+            referral=referral,
+            title="Friend opted in" if approval else "Friend rejected",
+            body=f"{referral.referred_to.full_name} {'accepted' if approval else 'rejected'} the referral",
+            meta={"approval": bool(approval)},
+        )
+
         payload = {
             "event": "referral.friend_accepted",
+            "unread": True,
             "referral_id": referral.id,
             "reference_id": referral.reference_id,
             "title": "Friend accepted",
@@ -977,6 +1020,18 @@ class CompleteReferralView(APIView):
             referral.save()
             assignment.status = status_value
             assignment.save()
+
+            log_activity(
+                event="completed" if status_value == "completed" else "cancelled",
+                actor=request.user,
+                referral=referral,
+                title="Referral completed" if status_value == "completed" else "Referral cancelled",
+                body=f"{request.user.full_name} marked referral {referral.reference_id} as {status_value}",
+                meta={
+                    "assignment_id": getattr(assignment, "id", None),
+                    "status": status_value,
+                },
+            )
 
             return Response({"message": "Referral marked as completed"}, status=status.HTTP_200_OK)
         except Exception as e:

@@ -3,11 +3,12 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from rest_framework import status
 from django.db.models import Q, Count, Max
+from django.db import models
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from datetime import timedelta
 import json
-from .models import ChatRoom, Message, MessageReadStatus, ChatParticipant
+from .models import ChatRoom, Message, MessageReadStatus, ChatParticipant, Notification
 from accounts.models import User, BusinessInfo
 from referr.models import Referral, ReferralAssignment
 from .serializers import (
@@ -655,6 +656,14 @@ class SendMessageView(APIView):
                 except Exception as notification_error:
                     print(f"Notification error (non-critical): {notification_error}")
                 
+                # Send notification to participants about the new message
+                try:
+                    participants = chat_room.get_participants()
+                    participant_ids = [p.id for p in participants]
+                    notify_new_message(message, participant_ids)
+                except Exception as notify_error:
+                    print(f"Notify error (non-critical): {notify_error}")
+                
                 response_serializer = MessageSerializer(message, context={'request': request})
                 
                 return Response({
@@ -1158,3 +1167,189 @@ class UpdateChatRoomView(APIView):
                 'success': False,
                 'error': 'Chat room not found'
             }, status=status.HTTP_404_NOT_FOUND)
+
+
+class NotificationListView(APIView):
+    """
+    List notifications for the authenticated user
+    """
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request):
+        """Get notifications for the current user"""
+        user = request.user
+        
+        # Pagination
+        page = int(request.GET.get('page', 1))
+        page_size = int(request.GET.get('page_size', 20))
+        offset = (page - 1) * page_size
+        
+        # Filter options
+        unread_only = request.GET.get('unread_only', 'false').lower() == 'true'
+        event_type = request.GET.get('event_type')
+        
+        # Base query
+        notifications = user.notifications.select_related(
+            'actor_user', 'referral', 'chat_room', 'chat_message'
+        )
+        
+        # Apply filters
+        if unread_only:
+            notifications = notifications.filter(is_read=False)
+        
+        if event_type:
+            notifications = notifications.filter(event_type=event_type)
+        
+        # Get total count before pagination
+        total_count = notifications.count()
+        unread_count = user.notifications.filter(is_read=False).count()
+        
+        # Apply pagination
+        notifications = notifications[offset:offset + page_size]
+        
+        # Serialize notifications
+        notifications_data = []
+        for notification in notifications:
+            notifications_data.append({
+                'id': notification.id,
+                'event_type': notification.event_type,
+                'title': notification.title,
+                'message': notification.message,
+                'is_read': notification.is_read,
+                'read_at': notification.read_at.isoformat() if notification.read_at else None,
+                'created_at': notification.created_at.isoformat(),
+                'actor': {
+                    'id': notification.actor_user.id,
+                    'name': notification.actor_user.full_name,
+                    'role': notification.actor_user.role,
+                } if notification.actor_user else None,
+                'referral_id': notification.referral.reference_id if notification.referral else None,
+                'room_id': notification.chat_room.room_id if notification.chat_room else None,
+                'message_id': notification.chat_message.id if notification.chat_message else None,
+                'meta_data': notification.meta_data,
+            })
+        
+        return Response({
+            'success': True,
+            'notifications': notifications_data,
+            'pagination': {
+                'page': page,
+                'page_size': page_size,
+                'total_count': total_count,
+                'unread_count': unread_count,
+                'has_more': len(notifications) == page_size
+            }
+        }, status=status.HTTP_200_OK)
+
+
+class MarkNotificationReadView(APIView):
+    """
+    Mark one or multiple notifications as read
+    """
+    permission_classes = [IsAuthenticated]
+    
+    def post(self, request):
+        """Mark notifications as read"""
+        try:
+            print("Request data:", request.data)
+            notification_id = request.data.get('notification_id')
+            notification_ids = request.data.get('notification_ids', [])
+            mark_all = request.data.get('mark_all', False)
+            
+            user = request.user
+            
+            if mark_all:
+                # Mark all unread notifications as read
+                updated_count = user.notifications.filter(is_read=False).update(
+                    is_read=True,
+                    read_at=timezone.now(),
+                    updated_at=timezone.now()
+                )
+                
+                return Response({
+                    'success': True,
+                    'message': f'Marked {updated_count} notifications as read',
+                    'marked_count': updated_count
+                }, status=status.HTTP_200_OK)
+            
+            # Support both single notification and bulk marking
+            if notification_id:
+                notification_ids = [notification_id]
+            
+            if not notification_ids:
+                return Response({
+                    'success': False,
+                    'error': 'No notification IDs provided'
+                }, status=status.HTTP_400_BAD_REQUEST)
+            
+            # Get notifications that belong to the current user
+            notifications = user.notifications.filter(
+                id__in=notification_ids,
+                is_read=False
+            )
+            
+            if not notifications.exists():
+                return Response({
+                    'success': True,
+                    'message': 'No unread notifications found to mark',
+                    'marked_count': 0
+                }, status=status.HTTP_200_OK)
+            
+            # Mark as read
+            updated_count = notifications.update(
+                is_read=True,
+                read_at=timezone.now(),
+                updated_at=timezone.now()
+            )
+            
+            return Response({
+                'success': True,
+                'message': f'Marked {updated_count} notifications as read',
+                'marked_count': updated_count,
+                'marked_notification_ids': list(notifications.values_list('id', flat=True))
+            }, status=status.HTTP_200_OK)
+            
+        except Exception as e:
+            return Response({
+                'success': False,
+                'error': f'Failed to mark notifications as read: {str(e)}'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class NotificationStatsView(APIView):
+    """
+    Get notification statistics for the user
+    """
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request):
+        """Get notification stats for the current user"""
+        user = request.user
+        
+        # Get stats by event type
+        from django.db.models import Count
+        stats_by_type = user.notifications.values('event_type').annotate(
+            total=Count('id'),
+            unread=Count('id', filter=models.Q(is_read=False))
+        ).order_by('event_type')
+        
+        # Overall stats
+        total_notifications = user.notifications.count()
+        unread_notifications = user.notifications.filter(is_read=False).count()
+        
+        # Recent activity (last 7 days)
+        from datetime import timedelta
+        seven_days_ago = timezone.now() - timedelta(days=7)
+        recent_notifications = user.notifications.filter(
+            created_at__gte=seven_days_ago
+        ).count()
+        
+        return Response({
+            'success': True,
+            'stats': {
+                'total_notifications': total_notifications,
+                'unread_notifications': unread_notifications,
+                'recent_notifications_7_days': recent_notifications,
+                'stats_by_type': list(stats_by_type)
+            }
+        }, status=status.HTTP_200_OK)

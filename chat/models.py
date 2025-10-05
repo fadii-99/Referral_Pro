@@ -499,3 +499,94 @@ class ChatParticipant(models.Model):
     
     def __str__(self):
         return f"{self.user.full_name} in {self.chat_room.room_id} ({self.role})"
+
+
+class Notification(models.Model):
+    """
+    Store notification records for users
+    """
+    NOTIFICATION_TYPES = [
+        ('referral.sent', 'Referral Sent'),
+        ('referral.accepted', 'Referral Accepted'),
+        ('referral.rejected', 'Referral Rejected'),
+        ('referral.completed', 'Referral Completed'),
+        ('chat.new_message', 'New Chat Message'),
+        ('system.update', 'System Update'),
+        ('reward.earned', 'Reward Earned'),
+        ('payment.processed', 'Payment Processed'),
+    ]
+    
+    # Target user who receives the notification
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='notifications')
+    
+    # Notification content
+    event_type = models.CharField(max_length=50, choices=NOTIFICATION_TYPES)
+    title = models.CharField(max_length=200)
+    message = models.TextField()
+    
+    # Status and interaction
+    is_read = models.BooleanField(default=False)
+    read_at = models.DateTimeField(null=True, blank=True)
+    is_delivered = models.BooleanField(default=False)  # For push notifications
+    delivered_at = models.DateTimeField(null=True, blank=True)
+    
+    # Related objects (nullable for flexibility)
+    referral = models.ForeignKey('referr.Referral', on_delete=models.CASCADE, null=True, blank=True, related_name='notifications')
+    chat_room = models.ForeignKey(ChatRoom, on_delete=models.CASCADE, null=True, blank=True, related_name='notifications')
+    chat_message = models.ForeignKey(Message, on_delete=models.CASCADE, null=True, blank=True, related_name='notifications')
+    
+    # Actor information (who triggered the notification)
+    actor_user = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='triggered_notifications')
+    
+    # Additional metadata stored as JSON
+    meta_data = models.JSONField(default=dict, blank=True)
+    
+    # Timestamps
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['user', '-created_at']),
+            models.Index(fields=['user', 'is_read']),
+            models.Index(fields=['event_type']),
+            models.Index(fields=['created_at']),
+        ]
+    
+    def __str__(self):
+        return f"{self.event_type} for {self.user.full_name}: {self.title}"
+    
+    def mark_as_read(self):
+        """Mark notification as read"""
+        if not self.is_read:
+            self.is_read = True
+            self.read_at = timezone.now()
+            self.save(update_fields=['is_read', 'read_at', 'updated_at'])
+    
+    def mark_as_delivered(self):
+        """Mark notification as delivered (for push notifications)"""
+        if not self.is_delivered:
+            self.is_delivered = True
+            self.delivered_at = timezone.now()
+            self.save(update_fields=['is_delivered', 'delivered_at', 'updated_at'])
+    
+    @classmethod
+    def create_notification(cls, user, event_type, title, message, **kwargs):
+        """
+        Create a new notification record
+        
+        Args:
+            user: User who will receive the notification
+            event_type: Type of notification (from NOTIFICATION_TYPES)
+            title: Notification title
+            message: Notification message
+            **kwargs: Additional fields like referral, chat_room, actor_user, meta_data
+        """
+        return cls.objects.create(
+            user=user,
+            event_type=event_type,
+            title=title,
+            message=message,
+            **kwargs
+        )

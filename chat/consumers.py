@@ -892,6 +892,9 @@ class NotificationConsumer(AsyncWebsocketConsumer):
     async def referral_notification(self, event):
         await self.send(text_data=json.dumps(event))
 
+    async def chat_notification(self, event):
+        await self.send(text_data=json.dumps(event))
+
 
 # ---------------------------------------------
 # Utility: Send notification to user
