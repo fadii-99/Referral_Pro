@@ -43,7 +43,8 @@ INSTALLED_APPS = [
     'accounts',
     'referr',
     'rewards',
-    'chat'
+    'chat',
+    'super',
 ]
 
 # -------------------------

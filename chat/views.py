@@ -15,6 +15,7 @@ from .serializers import (
     ChatRoomListSerializer, MessageCreateSerializer
 )
 from django.db.models import Count, Q
+from utils.notify import notify_new_message
 
 from django.core.serializers.json import DjangoJSONEncoder
 

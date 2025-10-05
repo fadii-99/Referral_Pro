@@ -20,6 +20,8 @@ from accounts.models import User, BusinessInfo, FavoriteCompany
 from utils.email_service import send_app_download_email, send_referral_email
 from utils.twilio_service import TwilioService
 from utils.storage_backends import generate_presigned_url
+from utils.notify import notify_users
+
 
 def IMAGEURL(image_path):
     image_url = None
@@ -309,6 +311,29 @@ class SendReferralView(APIView):
                 )
 
 
+            payload = {
+                "event": "referral.sent",
+                "referral_id": referral.id,
+                "reference_id": referral.reference_id,
+                "title": "New referral",
+                "message": f"{request.user.full_name} referred {referred_to_user.full_name} to {COMPANY.full_name}",
+                "actors": {
+                    "referred_by_id": request.user.id,
+                    "referred_to_id": referred_to_user.id,
+                    "company_id": COMPANY.id,
+                    "rep_id": None
+                },
+                "meta": {
+                    "company_name": COMPANY.full_name,
+                    "referred_by_name": request.user.full_name,
+                    "referred_to_name": referred_to_user.full_name,
+                    "status": referral.status,
+                }
+            }
+
+            notify_users([referred_to_user.id, COMPANY.id], payload)
+
+
             return Response(
                 {
                     "message": "Referral sent successfully",
@@ -375,6 +400,52 @@ class AssignRepView(APIView):
         referral_obj.status = "cancelled" if referral_status == "reject" else "in_progress"
         referral_obj.company_approval = True if referral_status == "accept" else False
         referral_obj.save()
+
+
+        if referral_status == "accept":
+            payload = {
+                "event": "referral.company_accepted",
+                "referral_id": referral_obj.id,
+                "reference_id": referral_obj.reference_id,
+                "title": "Company accepted your referral",
+                "message": f"{referral_obj.company.full_name} accepted the referral",
+                "actors": {
+                    "referred_by_id": referral_obj.referred_by.id,
+                    "referred_to_id": referral_obj.referred_to.id,
+                    "company_id": referral_obj.company.id,
+                    "rep_id": employee.id if employee else None
+                },
+                "meta": {
+                    "company_name": referral_obj.company.full_name,
+                    "referred_by_name": referral_obj.referred_by.full_name,
+                    "referred_to_name": referral_obj.referred_to.full_name,
+                    "status": referral_obj.status,
+                }
+            }
+            notify_users([referral_obj.referred_to.id, referral_obj.referred_by.id], payload)
+
+
+        payload = {
+            "event": "referral.rep_assigned",
+            "referral_id": referral_obj.id,
+            "reference_id": referral_obj.reference_id,
+            "title": "You were assigned a referral",
+            "message": f"You were assigned to {referral_obj.referred_to.full_name} @ {referral_obj.company.full_name}",
+            "actors": {
+                "referred_by_id": referral_obj.referred_by.id,
+                "referred_to_id": referral_obj.referred_to.id,
+                "company_id": referral_obj.company.id,
+                "rep_id": employee.id if employee else None
+            },
+            "meta": {
+                "company_name": referral_obj.company.full_name,
+                "referred_to_name": referral_obj.referred_to.full_name,
+                "status": referral_obj.status,
+            }
+        }
+
+        if employee:
+            notify_users([employee.id], payload)
 
         return Response(
             {
@@ -844,6 +915,28 @@ class SendAcceptView(APIView):
         referral.referred_by_approval = approval
         referral.status = "Friend opted in" if approval else "cancelled"
         referral.save()
+
+        payload = {
+            "event": "referral.friend_accepted",
+            "referral_id": referral.id,
+            "reference_id": referral.reference_id,
+            "title": "Friend accepted",
+            "message": f"{referral.referred_to.full_name} accepted the referral",
+            "actors": {
+                "referred_by_id": referral.referred_by.id,
+                "referred_to_id": referral.referred_to.id,
+                "company_id": referral.company.id,
+                "rep_id": None
+            },
+            "meta": {
+                "company_name": referral.company.full_name,
+                "referred_by_name": referral.referred_by.full_name,
+                "referred_to_name": referral.referred_to.full_name,
+                "status": referral.status,
+            }
+        }
+
+        notify_users([referral.referred_by.id, referral.company.id], payload)
 
 
 
