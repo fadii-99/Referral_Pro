@@ -327,12 +327,12 @@ class SendReferralView(APIView):
                 )
 
 
-            payload = {
+            payload_referred_to = {
                 "event": "referral.sent",
                 "referral_id": referral.id,
                 "reference_id": referral.reference_id,
                 "title": "New referral",
-                "message": f"{request.user.full_name} referred {referred_to_user.full_name} to {company.company_name if company.company_name else COMPANY.full_name}",
+                "message": f"{request.user.full_name} has referred you to {company.company_name if company.company_name else COMPANY.full_name}",
                 "actors": {
                     "referred_by_id": request.user.id,
                     "referred_to_id": referred_to_user.id,
@@ -347,7 +347,29 @@ class SendReferralView(APIView):
                 }
             }
 
-            notify_users([referred_to_user.id, COMPANY.id], payload)
+            payload_company = {
+                "event": "referral.sent",
+                "referral_id": referral.id,
+                "reference_id": referral.reference_id,
+                "title": "Received referral",
+                "message": f"Received referral for {referred_to_user.full_name}",
+                "actors": {
+                    "referred_by_id": request.user.id,
+                    "referred_to_id": referred_to_user.id,
+                    "company_id": COMPANY.id,
+                    "rep_id": None
+                },
+                "meta": {
+                    "company_name": COMPANY.full_name,
+                    "referred_by_name": request.user.full_name,
+                    "referred_to_name": referred_to_user.full_name,
+                    "status": referral.status,
+                }
+            }
+
+            # Send different notifications to different users
+            notify_users([referred_to_user.id], payload_referred_to)
+            notify_users([COMPANY.id], payload_company)
 
 
             return Response(
@@ -378,6 +400,9 @@ class AssignRepView(APIView):
         employee_id = data.get("employee_id")
         note = data.get("notes", "")
         referral_status = data.get("status", "in_progress")  # default to in_progress
+
+
+        
 
         # Validate referral
         try:
@@ -432,15 +457,21 @@ class AssignRepView(APIView):
             },
         )
 
+        try:
+            company = BusinessInfo.objects.get(user_id=referral_obj.company.id)
+        except Exception as e:
+            return Response({"error": "Company not found"}, status=status.HTTP_404_NOT_FOUND)
+
 
         if referral_status == "accept":
-            payload = {
+            # Payload for referred_by - company accepted referral
+            payload_referred_by = {
                 "event": "referral.company_accepted",
                 "unread": True,
                 "referral_id": referral_obj.id,
                 "reference_id": referral_obj.reference_id,
                 "title": "Company accepted your referral",
-                "message": f"{referral_obj.company.full_name} accepted the referral",
+                "message": f"{company.company_name} has accepted the referral",
                 "actors": {
                     "referred_by_id": referral_obj.referred_by.id,
                     "referred_to_id": referral_obj.referred_to.id,
@@ -454,16 +485,41 @@ class AssignRepView(APIView):
                     "status": referral_obj.status,
                 }
             }
-            notify_users([referral_obj.referred_to.id, referral_obj.referred_by.id], payload)
 
+            # Payload for referred_to - company accepted referral
+            payload_referred_to = {
+                "event": "referral.company_accepted",
+                "unread": True,
+                "referral_id": referral_obj.id,
+                "reference_id": referral_obj.reference_id,
+                "title": "Company accepted referral",
+                "message": f"{company.company_name} has accepted the referral",
+                "actors": {
+                    "referred_by_id": referral_obj.referred_by.id,
+                    "referred_to_id": referral_obj.referred_to.id,
+                    "company_id": referral_obj.company.id,
+                    "rep_id": employee.id if employee else None
+                },
+                "meta": {
+                    "company_name": referral_obj.company.full_name,
+                    "referred_by_name": referral_obj.referred_by.full_name,
+                    "referred_to_name": referral_obj.referred_to.full_name,
+                    "status": referral_obj.status,
+                }
+            }
 
-        payload = {
+            # Send notifications separately
+            notify_users([referral_obj.referred_by.id], payload_referred_by)
+            notify_users([referral_obj.referred_to.id], payload_referred_to)
+
+        # Payload for employee - assigned to referral
+        payload_employee = {
             "event": "referral.rep_assigned",
             "unread": True,
             "referral_id": referral_obj.id,
             "reference_id": referral_obj.reference_id,
             "title": "You were assigned a referral",
-            "message": f"You were assigned to {referral_obj.referred_to.full_name} @ {referral_obj.company.full_name}",
+            "message": f"You have been assigned to referral #{referral_obj.reference_id}",
             "actors": {
                 "referred_by_id": referral_obj.referred_by.id,
                 "referred_to_id": referral_obj.referred_to.id,
@@ -478,7 +534,7 @@ class AssignRepView(APIView):
         }
 
         if employee:
-            notify_users([employee.id], payload)
+            notify_users([employee.id], payload_employee)
 
         return Response(
             {
@@ -963,8 +1019,8 @@ class SendAcceptView(APIView):
             "unread": True,
             "referral_id": referral.id,
             "reference_id": referral.reference_id,
-            "title": "Friend accepted",
-            "message": f"{referral.referred_to.full_name} accepted the referral",
+            "title": "Referral Accepted",
+            "message": f"{referral.referred_to.full_name} accepted the referral #{referral.reference_id}",
             "actors": {
                 "referred_by_id": referral.referred_by.id,
                 "referred_to_id": referral.referred_to.id,
@@ -1032,6 +1088,54 @@ class CompleteReferralView(APIView):
                     "status": status_value,
                 },
             )
+
+            # Payload for company - employee completed referral
+            payload_company = {
+                "event": "referral.completed",
+                "unread": True,
+                "referral_id": referral.id,
+                "reference_id": referral.reference_id,
+                "title": "Referral Completed",
+                "message": f"{request.user.full_name} completed the referral #{referral.reference_id}",
+                "actors": {
+                    "referred_by_id": referral.referred_by.id,
+                    "referred_to_id": referral.referred_to.id,
+                    "company_id": referral.company.id,
+                    "rep_id": request.user.id
+                },
+                "meta": {
+                    "company_name": referral.company.full_name,
+                    "referred_by_name": referral.referred_by.full_name,
+                    "referred_to_name": referral.referred_to.full_name,
+                    "status": referral.status,
+                }
+            }
+
+            # Payload for referred_by - company completed referral
+            payload_referred_by = {
+                "event": "referral.completed",
+                "unread": True,
+                "referral_id": referral.id,
+                "reference_id": referral.reference_id,
+                "title": "Referral Completed",
+                "message": f"{referral.company.full_name} has completed the referral #{referral.reference_id}",
+                "actors": {
+                    "referred_by_id": referral.referred_by.id,
+                    "referred_to_id": referral.referred_to.id,
+                    "company_id": referral.company.id,
+                    "rep_id": request.user.id
+                },
+                "meta": {
+                    "company_name": referral.company.full_name,
+                    "referred_by_name": referral.referred_by.full_name,
+                    "referred_to_name": referral.referred_to.full_name,
+                    "status": referral.status,
+                }
+            }
+
+            # Send different notifications to different users
+            notify_users([referral.company.id], payload_company)
+            notify_users([referral.referred_by.id], payload_referred_by)
 
             return Response({"message": "Referral marked as completed"}, status=status.HTTP_200_OK)
         except Exception as e:
