@@ -21,7 +21,7 @@ from utils.notify import notify_new_message
 from django.core.serializers.json import DjangoJSONEncoder
 
 from utils.storage_backends import generate_presigned_url
-
+from utils.push import send_push_notification_to_user 
 
 def serialize_message_with_read_state(msg, viewer, participants):
     """
@@ -663,6 +663,11 @@ class SendMessageView(APIView):
                     notify_new_message(message, participant_ids)
                 except Exception as notify_error:
                     print(f"Notify error (non-critical): {notify_error}")
+
+                try:
+                    self._send_push_notifications_to_participants(chat_room, message, request.user)
+                except Exception as push_error:
+                    print(f"Push notification error (non-critical): {push_error}")
                 
                 response_serializer = MessageSerializer(message, context={'request': request})
                 
@@ -773,6 +778,77 @@ class SendMessageView(APIView):
         
         return chat_rooms
 
+    def _send_push_notifications_to_participants(self, chat_room, message, sender):
+        """Send push notifications to all participants except the sender"""
+        try:
+            participants = chat_room.get_participants()
+            
+            # Get the chat display name for the sender
+            sender_name = sender.full_name or sender.email
+            
+            # Get chat room name based on participants
+            if hasattr(chat_room, 'get_display_name'):
+                chat_name = chat_room.get_display_name(sender)
+            else:
+                chat_name = "Chat"
+            
+            # Prepare notification content based on message type
+            if message.message_type == 'text':
+                notification_body = message.content[:100] + ('...' if len(message.content) > 100 else '')
+            elif message.message_type == 'image':
+                notification_body = f"{sender_name} sent an image"
+            elif message.message_type == 'document':
+                notification_body = f"{sender_name} sent a document"
+            elif message.message_type == 'file':
+                notification_body = f"{sender_name} sent a file"
+            else:
+                notification_body = f"{sender_name} sent a message"
+            
+            # Prepare notification data for deep linking
+            notification_data = {
+                'room_id': str(chat_room.room_id),
+                'message_id': str(message.id),
+                'sender_id': str(sender.id),
+                'sender_name': sender_name,
+                'type': 'new_message',
+                'referral_id': str(chat_room.referral.reference_id) if hasattr(chat_room, 'referral') and chat_room.referral else None,
+                'timestamp': str(message.created_at.isoformat())
+            }
+            
+            # Send to each participant except the sender
+            # notification_results = []
+            for participant in participants:
+                if participant.id != sender.id:
+                    try:
+                        result = send_push_notification_to_user(
+                            user=participant,
+                            title=f"New message from {sender_name}",
+                            body=notification_body,
+                            data=notification_data
+                        )
+                        
+                        # notification_results.append({
+                        #     'user_id': participant.id,
+                        #     'result': result
+                        # })
+                        
+                        if result.get('error'):
+                            print(f"❌ Failed to send push notification to user {participant.id}: {result['error']}")
+                        else:
+                            print(f"✅ Push notification sent successfully to user {participant.id} - {result.get('success', 0)} devices")
+                            
+                    except Exception as individual_push_error:
+                        print(f"❌ Error sending push notification to user {participant.id}: {individual_push_error}")
+                        # notification_results.append({
+                        #     'user_id': participant.id,
+                        #     'result': {'error': str(individual_push_error)}
+                        # })
+
+            return None
+                        
+        except Exception as e:
+            print(f"❌ Error in _send_push_notifications_to_participants: {str(e)}")
+            raise
 
 
 

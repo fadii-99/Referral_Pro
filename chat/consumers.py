@@ -520,9 +520,14 @@ class ChatConsumer(BaseJsonConsumer):
 
     @database_sync_to_async
     def update_user_online_status(self, is_online):
+        from django.utils import timezone
+        
         ChatRoom = apps.get_model("chat", "ChatRoom")
         ChatParticipant = apps.get_model("chat", "ChatParticipant")
+        Device = apps.get_model("accounts", "Device")
+        
         try:
+            # Update chat participant status
             chat_room = ChatRoom.objects.get(room_id=self.room_id)
             participant, created = ChatParticipant.objects.get_or_create(
                 chat_room=chat_room,
@@ -532,6 +537,23 @@ class ChatConsumer(BaseJsonConsumer):
             if not created:
                 participant.is_online = is_online
                 participant.save(update_fields=["is_online", "last_seen_at"])
+            
+            # Update device online status for ALL user's devices
+            if is_online:
+                # Mark all user's devices as online when they connect
+                Device.objects.filter(user=self.user).update(
+                    is_online=True,
+                    last_seen=timezone.now()
+                )
+            else:
+                # Mark all user's devices as offline when they disconnect
+                Device.objects.filter(user=self.user).update(
+                    is_online=False,
+                    last_seen=timezone.now()
+                )
+            
+            print(f"{'✅' if is_online else '🔴'} Updated online status for user {self.user.id}: {is_online}")
+            
         except ChatRoom.DoesNotExist:
             pass
 
@@ -705,6 +727,9 @@ class ChatListConsumer(BaseJsonConsumer):
         await self.channel_layer.group_add(self.group_name, self.channel_name)
         await self.accept()
 
+        # Mark user as online when they connect to chat list
+        await self.update_device_online_status(True)
+
         # Initial payload: API-shaped rooms list
         rooms_data = await self._fetch_and_serialize_rooms_for_user(self.user)
         user_profile = await self._get_user_profile_info()
@@ -719,6 +744,9 @@ class ChatListConsumer(BaseJsonConsumer):
         print(f"✅ WebSocket connection accepted. Group: {self.group_name}")
 
     async def disconnect(self, close_code):
+        # Mark user as offline when they disconnect from chat list
+        await self.update_device_online_status(False)
+        
         if hasattr(self, 'group_name'):
             await self.channel_layer.group_discard(self.group_name, self.channel_name)
             print(f"🔌 WebSocket disconnected from group: {self.group_name}")
@@ -841,6 +869,32 @@ class ChatListConsumer(BaseJsonConsumer):
         for r in rooms:
             out.append(await self._serialize_room_for_list(r, viewer))
         return out
+
+    @database_sync_to_async
+    def update_device_online_status(self, is_online):
+        """Update device online status for push notification control"""
+        from django.utils import timezone
+        
+        Device = apps.get_model("accounts", "Device")
+        
+        try:
+            if is_online:
+                # Mark all user's devices as online when they connect
+                Device.objects.filter(user=self.user).update(
+                    is_online=True,
+                    last_seen=timezone.now()
+                )
+            else:
+                # Mark all user's devices as offline when they disconnect
+                Device.objects.filter(user=self.user).update(
+                    is_online=False,
+                    last_seen=timezone.now()
+                )
+            
+            print(f"{'✅' if is_online else '🔴'} Updated device online status for user {self.user.id}: {is_online}")
+            
+        except Exception as e:
+            print(f"❌ Error updating device online status for user {self.user.id}: {e}")
 
 
 

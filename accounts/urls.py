@@ -16,8 +16,12 @@ from .views import (
     SetEmployeePasswordView,
     ResetPasswordView,
     AccountDeletionView,
-    checkEmailExistsView
+    checkEmailExistsView,
+    RegisterFCMTokenView,
+    UnregisterFCMTokenView,
 )
+
+
 
 urlpatterns = [
     # Basic auth endpoints
@@ -47,4 +51,8 @@ urlpatterns = [
 
     # Social auth endpoints
     path('facebook/callback/<str:code>/', SocialLoginView.as_view(), name='facebook_login'),
+
+    path("push/register/", RegisterFCMTokenView.as_view()),
+    path("push/unregister/", UnregisterFCMTokenView.as_view()),
+
 ]

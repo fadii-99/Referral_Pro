@@ -89,3 +89,4 @@ wcwidth==0.2.13
 websockets==15.0.1
 yarl==1.20.1
 zope.interface==8.0.1
+pyfcm

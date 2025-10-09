@@ -355,8 +355,38 @@ class ReferralUsage(models.Model):
     
 
 
+class Device(models.Model):
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="devices")
+    token = models.CharField(max_length=255, unique=True)
+    platform = models.CharField(max_length=10, choices=[('android', 'Android'), ('ios', 'iOS')])
+    is_online = models.BooleanField(default=False, help_text="Whether the device is currently online/app is open")
+    last_seen = models.DateTimeField(null=True, blank=True, help_text="Last time the device was seen online")
+    created_at = models.DateTimeField(auto_now_add=True, null=True, blank=True)
 
+    class Meta:
+        indexes = [
+            models.Index(fields=["user", "token"]),
+            models.Index(fields=["created_at"]),
+            models.Index(fields=["user", "is_online"]),
+            models.Index(fields=["last_seen"]),
+        ]
 
+    def __str__(self):
+        return f"{self.user_id}:{self.token[:12]}..."
+        
+    def mark_online(self):
+        """Mark device as online"""
+        from django.utils import timezone
+        self.is_online = True
+        self.last_seen = timezone.now()
+        self.save(update_fields=['is_online', 'last_seen'])
+    
+    def mark_offline(self):
+        """Mark device as offline"""
+        from django.utils import timezone
+        self.is_online = False
+        self.last_seen = timezone.now()
+        self.save(update_fields=['is_online', 'last_seen'])
 
 
 

@@ -48,6 +48,10 @@ INSTALLED_APPS = [
     "activity",
 ]
 
+FCM_SERVER_KEY = os.getenv("FCM_SERVER_KEY")
+
+
+
 # -------------------------
 # Middleware
 # -------------------------

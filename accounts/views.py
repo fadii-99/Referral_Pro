@@ -13,7 +13,7 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework_simplejwt.tokens import RefreshToken
 
 # models
-from .models import User, FavoriteCompany, ReferralUsage, BusinessInfo
+from .models import User, FavoriteCompany, ReferralUsage, BusinessInfo, Device
 from .models import Subscription, Transaction
 
 # utils
@@ -562,6 +562,9 @@ class SocialLoginView(APIView):
             email=user_info["email"],
             defaults={"full_name": user_info.get("name", ""), "role": "solo"}
         )
+
+        if user.role != "solo":
+            return Response({"error": "This email already exists as " + user.role}, status=400)
        
 
         if user_info.get("name") and not user.full_name:
@@ -1177,6 +1180,9 @@ class LogoutView(APIView):
             user = request.user
             user.is_active = False
             user.save()
+
+            Device.objects.filter(user=user).delete()
+
             return Response({"message": "Logout successful."}, status=200)
         except TokenError:
             return Response({"error": "Invalid or expired token."}, status=400)
@@ -1296,9 +1302,30 @@ class ResetPasswordView(APIView):
 
 
 
+class RegisterFCMTokenView(APIView):
+    permission_classes = [IsAuthenticated]
+    
+    def post(self, request):
+        token = request.data.get("token")
+        platform = request.data.get("platform", "Android")
+
+        print("Register FCM payload:", request.data)
+        print("User:", request.user.email)
+        if not token:
+            return Response({"error": "Token is required"}, status=400)
+
+        Device.objects.update_or_create(
+            user=request.user, token=token,
+            defaults={"platform": platform}
+        )
+        return Response({"message": "Token registered successfully"})
 
 
-
-
-
-
+class UnregisterFCMTokenView(APIView):
+    permission_classes = [IsAuthenticated]
+    
+    def post(self, request):
+        token = request.data.get("token")
+        if token:
+            Device.objects.filter(user=request.user, token=token).delete()
+        return Response({"message": "Token removed"})
