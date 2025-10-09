@@ -35,6 +35,6 @@ build/
 *.egg
 *.manifest
 *.spec
-
+Referral_Pro/firebase_service_account.json
 
 
