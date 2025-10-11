@@ -55,6 +55,7 @@ class User(AbstractBaseUser, PermissionsMixin):
     # CHANGED: Update image field with custom storage and change upload_to path temporarily
     image = models.ImageField(upload_to="user_profiles/", storage=media_storage, null=True, blank=True)
     role = models.CharField(max_length=20, choices=ROLE_CHOICES, default="solo")
+    social_platform = models.CharField(max_length=20, blank=True, null=True)
     referral_code = models.CharField(max_length=20, null=True, blank=True, editable=False)
 
     parent_company = models.ForeignKey(
@@ -353,6 +354,122 @@ class ReferralUsage(models.Model):
     notes = models.TextField(blank=True, null=True, help_text="Optional notes about this referral usage")
     
     
+
+
+class Review(models.Model):
+    """
+    Reviews given by solo users to businesses/companies
+    """
+    RATING_CHOICES = [
+        (1, '1 Star'),
+        (2, '2 Stars'),
+        (3, '3 Stars'),
+        (4, '4 Stars'),
+        (5, '5 Stars'),
+    ]
+    
+    # The solo user who is giving the review
+    review_by = models.ForeignKey(
+        User, 
+        on_delete=models.CASCADE, 
+        related_name="given_reviews",
+        limit_choices_to={"role": "solo"}
+    )
+    
+    # The business/company being reviewed
+    business = models.ForeignKey(
+        User, 
+        on_delete=models.CASCADE, 
+        related_name="received_reviews",
+        limit_choices_to={"role": "company"}
+    )
+    
+    # Review details
+    review_rating = models.PositiveIntegerField(choices=RATING_CHOICES, default=5)
+    review_feedback = models.TextField(blank=True, null=True, help_text="Written feedback about the business")
+    
+    # Automatically populated fields
+    review_by_name = models.CharField(max_length=150, help_text="Name of the person who gave the review")
+    review_by_image = models.URLField(blank=True, null=True, help_text="Profile image URL of the reviewer")
+    
+    # Timestamps
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        # Ensure one review per solo user per business
+        unique_together = ('review_by', 'business')
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['business', 'created_at']),
+            models.Index(fields=['review_by', 'created_at']),
+            models.Index(fields=['review_rating']),
+        ]
+
+    def __str__(self):
+        business_name = getattr(self.business.business_info, 'company_name', self.business.email) if hasattr(self.business, 'business_info') else self.business.email
+        return f"{self.review_by.full_name or self.review_by.email} -> {business_name} ({self.review_rating} stars)"
+    
+    def time_ago(self):
+        """Calculate and return human-readable time since review was created"""
+        from django.utils import timezone
+        from datetime import timedelta
+        
+        now = timezone.now()
+        diff = now - self.created_at
+        
+        if diff.days > 365:
+            years = diff.days // 365
+            return f"{years} year{'s' if years > 1 else ''} ago"
+        elif diff.days > 30:
+            months = diff.days // 30
+            return f"{months} month{'s' if months > 1 else ''} ago"
+        elif diff.days > 0:
+            return f"{diff.days} day{'s' if diff.days > 1 else ''} ago"
+        elif diff.seconds > 3600:
+            hours = diff.seconds // 3600
+            return f"{hours} hour{'s' if hours > 1 else ''} ago"
+        elif diff.seconds > 60:
+            minutes = diff.seconds // 60
+            return f"{minutes} minute{'s' if minutes > 1 else ''} ago"
+        else:
+            return "Just now"
+    
+    def save(self, *args, **kwargs):
+        """Auto-populate reviewer name and image on save"""
+        if self.review_by:
+            self.review_by_name = self.review_by.full_name or self.review_by.email
+            if self.review_by.image:
+                self.review_by_image = str(self.review_by.image)
+        super().save(*args, **kwargs)
+
+
+class ReviewImage(models.Model):
+    """
+    Images attached to reviews (max 3 per review)
+    """
+    review = models.ForeignKey(Review, on_delete=models.CASCADE, related_name="review_gallery")
+    image = models.ImageField(
+        upload_to="review_images/", 
+        storage=media_storage, 
+        help_text="Review image stored in S3"
+    )
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+    
+    class Meta:
+        ordering = ['uploaded_at']
+        indexes = [
+            models.Index(fields=['review', 'uploaded_at']),
+        ]
+    
+    def __str__(self):
+        return f"Image for review by {self.review.review_by_name}"
+    
+    def get_image_url(self):
+        """Get the full S3 URL for the review image"""
+        if self.image:
+            return str(self.image)
+        return None
 
 
 class Device(models.Model):

@@ -18,7 +18,8 @@ from django.urls import path, include
 from django.conf import settings
 from django.conf.urls.static import static
 from activity.views import ActivityListView
-from chat import views
+from chat import views as views1
+from accounts import views as views2
 
 
 urlpatterns = [
@@ -28,9 +29,13 @@ urlpatterns = [
     path('super/', include('super.urls')),
     path("activity/", ActivityListView.as_view(), name="activity_list"),
 
-    path('notifications/', views.NotificationListView.as_view(), name='notification_list'),
-    path('notifications/mark-read/', views.MarkNotificationReadView.as_view(), name='mark_notification_read'),
-    path('notifications/stats/', views.NotificationStatsView.as_view(), name='notification_stats'),
+    path('notifications/', views1.NotificationListView.as_view(), name='notification_list'),
+    path('notifications/mark-read/', views1.MarkNotificationReadView.as_view(), name='mark_notification_read'),
+    path('notifications/stats/', views1.NotificationStatsView.as_view(), name='notification_stats'),
+
+    # Review endpoints
+    path('reviews/', views2.ReviewManagementView.as_view(), name='review_management'),  # GET (list), POST (create), PUT (update), DELETE
+    path('business/<int:business_id>/reviews/', views2.BusinessReviewsView.as_view(), name='business_reviews'),  # GET all reviews for a business
 
     # path('swagger/', schema_view.with_ui('swagger', cache_timeout=0), name='schema-swagger-ui'),
     # path('redoc/', schema_view.with_ui('redoc', cache_timeout=0), name='schema-redoc'),

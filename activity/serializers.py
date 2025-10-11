@@ -16,10 +16,22 @@ class ActivityLogSerializer(serializers.ModelSerializer):
         ]
 
     def get_actor_name(self, obj):
-        return getattr(obj.actor, "full_name", None)
+        actor = obj.actor
+        if actor.role == "company":
+            business_info = getattr(actor, "business_info", None)
+            if business_info and hasattr(business_info, "company_name"):
+                return business_info.company_name
+            return actor.full_name or actor.email
+        return actor.full_name or actor.email
 
     def get_subject_name(self, obj):
-        return getattr(obj.subject_user, "full_name", None)
+        subject = obj.subject_user
+        if subject and subject.role == "company":
+            business_info = getattr(subject, "business_info", None)
+            if business_info and hasattr(business_info, "company_name"):
+                return business_info.company_name
+            return subject.full_name or subject.email
+        return getattr(subject, "full_name", None) or getattr(subject, "email", None)
 
     def get_reference_id(self, obj):
         return getattr(obj.referral, "reference_id", None)

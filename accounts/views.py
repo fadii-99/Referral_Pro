@@ -3,6 +3,7 @@ from django.contrib.auth import authenticate
 from django.conf import settings
 from django.utils import timezone
 from django.utils.timezone import localtime
+from django.db import models
 
 # rest framework
 from rest_framework_simplejwt.tokens import RefreshToken, TokenError
@@ -13,7 +14,7 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework_simplejwt.tokens import RefreshToken
 
 # models
-from .models import User, FavoriteCompany, ReferralUsage, BusinessInfo, Device
+from .models import User, FavoriteCompany, ReferralUsage, BusinessInfo, Device, Review, ReviewImage
 from .models import Subscription, Transaction
 
 # utils
@@ -75,7 +76,6 @@ class SignupView(APIView):
     """Email/Password signup for Solo & Business users"""
     def post(self, request):
 
-        print("payload: ",request.data)
         
 
         # Handle both flat and nested payloads
@@ -377,7 +377,6 @@ class SignupView(APIView):
 
             if existing_user.is_to_be_registered:
                 try:
-                    print("Existing to-be-registered user found:", existing_user.email)
                     existing_user.full_name = request.data.get("name")
 
 
@@ -390,13 +389,11 @@ class SignupView(APIView):
 
 
                     if request.data.get("referral_code"):
-                        print("Referral code used:", request.data.get("referral_code"))
                         RU = ReferralUsage.objects.create(
                             referral_code=request.data.get("referral_code"),
                             used_by=existing_user
                         )
                         
-                    print("Solo user created:", existing_user.email)
 
                     return Response({
                         "message": "Solo user registered successfully",
@@ -407,9 +404,7 @@ class SignupView(APIView):
                     print("Error registering to-be-registered user:", str(e))
                     return Response({"error": "Failed to complete registration. Please try again."}, status=500)
             else:
-                print("New solo user signup:", request.data)
                 if User.objects.filter(email=request.data.get("email")).exists():
-                    print("Email already registered")
                     return Response({"error": "Email already registered"}, status=400)
 
 
@@ -429,13 +424,11 @@ class SignupView(APIView):
 
 
                 if request.data.get("referral_code"):
-                    print("Referral code used:", request.data.get("referral_code"))
                     RU = ReferralUsage.objects.create(
                         referral_code=request.data.get("referral_code"),
                         used_by=user
                     )
                     
-                print("Solo user created:", user.email)
 
                 return Response({
                     "message": "Solo user registered successfully",
@@ -448,7 +441,6 @@ class EmailPasswordLoginView(APIView):
     authentication_classes = []
 
     def post(self, request):
-        print(request.data)
         email = request.data.get("email")
         password = request.data.get("password")
         role = request.data.get("role")
@@ -458,30 +450,28 @@ class EmailPasswordLoginView(APIView):
         if not email or not password:
             return Response({"error": "Email and password required"}, status=400)
         
-        # if typee == "web":
-        #     role = "company"
+        if typee == "web":
+            role = "company"
         
 
         try:
             user = User.objects.get(email=email)
-            print(user.email, user.role, user.is_active)
             if user.check_password(password):
                 # Authentication successful, set user as active
                 user.is_active = True
                 user.save()
             else:
-                print("Invalid password for user:", email)
                 return Response({"error": "Invalid credentials"}, status=401)
         except User.DoesNotExist:
-            print("No user found with email:", email)
             return Response({"error": "Invalid credentials"}, status=401)
+        
         
         if role == "rep":
             role = "employee"
 
 
+
         if role != user.role:
-            print("Role mismatch: expected", role, "but user role is", user.role)
             return Response({"error": "Invalid credentials"}, status=401)
         
         tokens = get_tokens_for_user(user)
@@ -490,7 +480,6 @@ class EmailPasswordLoginView(APIView):
 
 
         if user.role == "admin":
-            print("Admin login")
             response = Response({
                 "user": {"email": user.email, "name": user.full_name, "role": user.role},
                 "tokens": tokens
@@ -526,12 +515,12 @@ class EmailPasswordLoginView(APIView):
 # -------------------------
 # Social Logins (Solo only)
 # -------------------------
+
 class SocialLoginView(APIView):
     permission_classes = [AllowAny]
     authentication_classes = []
     
     def post(self, request):
-        print("Social login payload:", request.data)
         provider = request.data.get("provider")
         if provider not in ["google", "facebook", "apple"]:
             return Response({"error": "Invalid provider"}, status=400)
@@ -547,111 +536,93 @@ class SocialLoginView(APIView):
             elif provider == "facebook":
                 user_info = self._verify_facebook_token(token)
             else:  # apple
-                print("Verifying Apple token")
                 user_info = self._verify_apple_token(token)
                 if user_info.get("is_relay"):
                     return Response({"error": "hidden"}, status=400)
-                print("Apple user info:", user_info)
         except Exception as e:
             return Response({"error": f"Invalid {provider} token: {str(e)}"}, status=400)
 
         if not user_info.get("email"):
             return Response({"error": f"{provider} did not return email"}, status=400)
 
-        user, _ = User.objects.get_or_create(
-            email=user_info["email"],
-            defaults={"full_name": user_info.get("name", ""), "role": "solo"}
-        )
+        # Check if user already exists
+        try:
+            existing_user = User.objects.get(email=user_info["email"])
+            
+            # Handle to-be-registered users
+            if existing_user.is_to_be_registered:
+                try:
+                    # Complete registration for existing to-be-registered user
+                    if user_info.get("name") and not existing_user.full_name:
+                        existing_user.full_name = user_info["name"]
+                    
+                    existing_user.is_to_be_registered = False
+                    existing_user.social_platform = user_info["platform"]
+                    
+                    if user_info.get("picture") and not existing_user.image:
+                        existing_user.image = user_info["picture"]
+                    
+                    existing_user.save()
 
-        if user.role != "solo":
-            return Response({"error": "This email already exists as " + user.role}, status=400)
-       
+                    tokens = get_tokens_for_user(existing_user)
+                    existing_user.is_active = True
+                    existing_user.save()
 
-        if user_info.get("name") and not user.full_name:
-            user.full_name = user_info["name"]
+                    return Response({
+                        "message": "Social login registration completed successfully",
+                        "user": {"email": existing_user.email, "name": existing_user.full_name, "role": existing_user.role},
+                        "tokens": tokens
+                    }, status=200)
+                    
+                except Exception as e:
+                    print("Error completing social registration for to-be-registered user:", str(e))
+                    return Response({"error": "Failed to complete social registration. Please try again."}, status=500)
+            
+            else:
+                # Existing user - normal login flow
+                if existing_user.role != "solo":
+                    return Response({"error": "This email already exists as " + existing_user.role}, status=400)
+
+                # Update user info if missing
+                if user_info.get("name") and not existing_user.full_name:
+                    existing_user.full_name = user_info["name"]
+                    existing_user.save()
+
+                if user_info.get("picture") and not existing_user.image:
+                    existing_user.image = user_info["picture"]
+                    existing_user.save()
+
+                tokens = get_tokens_for_user(existing_user)
+                existing_user.is_active = True
+                existing_user.save()
+                
+                return Response({
+                    "user": {"email": existing_user.email, "name": existing_user.full_name, "role": existing_user.role}, 
+                    "tokens": tokens
+                })
+
+        except User.DoesNotExist:
+            # Create new user
+            user = User.objects.create_user(
+                email=user_info["email"],
+                social_platform=user_info["platform"],
+                full_name=user_info.get("name", ""),
+                role="solo",
+                image=user_info.get("picture")
+            )
+
+            tokens = get_tokens_for_user(user)
+            user.is_active = True
             user.save()
-
-        if user_info.get("picture") and not user.image:
-            user.image = user_info["picture"]
-            user.save()
-
-        tokens = get_tokens_for_user(user)
-        user.is_active = True
-        user.save()
-        return Response({"user": {"email": user.email, "name": user.full_name, "role": user.role}, "tokens": tokens})
-
-    def _verify_google_token(self, token):
-        info = id_token.verify_oauth2_token(token, google_requests.Request())
-
-        print("\nGoogle token info:", info)
-        
-        # Get user email from token info
-        email = info.get("email")
-        if not email:
-            raise Exception("Email not found in Google token")
+            
+            return Response({
+                "user": {"email": user.email, "name": user.full_name, "role": user.role}, 
+                "tokens": tokens
+            })
 
 
 
-        
-        return {
-            "email": email,
-            "name": info.get("name", ""),
-            "picture": info.get("picture")
-        }
 
-    def _verify_facebook_token(self, token):
-        fb_url = f"https://graph.facebook.com/me?fields=id,name,email,picture&access_token={token}"
-        resp = requests.get(fb_url)
-        if resp.status_code != 200:
-            raise Exception("Invalid token")
-        data = resp.json()
-        return {
-            "email": data.get("email"),
-            "name": data.get("name"),
-            "picture": data.get("picture", {}).get("data", {}).get("url")
-        }
-
-    def _verify_apple_token(self, token: str):
-        # 1. Decode header to find kid
-        header = jwt.get_unverified_header(token)
-        kid = header["kid"]
-
-        # 2. Fetch Apple public keys
-        apple_keys = requests.get("https://appleid.apple.com/auth/keys").json()["keys"]
-
-        # 3. Match correct key
-        key = next((k for k in apple_keys if k["kid"] == kid), None)
-        if not key:
-            raise ValueError("Public key not found for given kid")
-
-        # 4. Build public key
-        public_key = RSAAlgorithm.from_jwk(key)
-
-        # 5. Decode and verify JWT
-        info = jwt.decode(
-            token,
-            key=public_key,
-            algorithms=["RS256"],
-            audience=settings.APPLE_BUNDLE_ID,
-            issuer="https://appleid.apple.com"
-        )
-        print("\nApple token info:", info)
-        emaill = info.get("email")
-        print("\nApple email:", emaill)
-
-        is_relay = False
-
-        if emaill.endswith("@privaterelay.appleid.com"):
-            is_relay = True
-
-
-        return {
-            "email": info.get("email"),
-            "name": info.get("name", ""),
-            "sub": info.get("sub") ,"is_relay": is_relay 
-        }
-
- 
 # -------------------------
 # Password Reset Flow
 # -------------------------
@@ -660,21 +631,17 @@ class SendOTPView(APIView):
     authentication_classes = []
 
     def post(self, request):
-        print("jbcasabcasdcpn ",request.data)
         email = request.data.get('email')
         phone = request.data.get('phone')
 
-        print(request.data)
 
 
         # Find user by email or phone
         try:
             if email:
-                print("Finding user by email:", email)
                 user = User.objects.get(email=email)
             else:
                 user = User.objects.get(phone=phone)
-                print(user.phone)
         except User.DoesNotExist as e:
             print("No user found with given email/phone", str(e))
             return Response({"error": "No account found with these credentials"}, status=404)
@@ -684,7 +651,6 @@ class SendOTPView(APIView):
 
         # Generate OTP
         otp = generate_otp(user, purpose="password_reset", expires_in=10)
-        print(otp.code)
 
         # Send OTP via email or SMS
         try:
@@ -706,7 +672,6 @@ class VerifyOTPView(APIView):
     authentication_classes = []
 
     def post(self, request):
-        print(request.data)
         email = request.data.get('email')
         otp_code = request.data.get('otp')
 
@@ -876,7 +841,6 @@ class EmployeeManagementView(APIView):
     def delete(self, request):
         """Delete employee"""
         user_id = request.GET.get("id")
-        print("user_id", user_id)
         if not user_id:
             return Response({"error": "Employee ID required"}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -895,14 +859,10 @@ class SetEmployeePasswordView(APIView):
 
     def post(self, request):
         new_password = request.data.get('new_password')
-        print("new_password", new_password)
 
         if not all([ new_password]):
             return Response({"error": "new password"}, status=status.HTTP_400_BAD_REQUEST)
         
-
-        print("request.user", request.user.id)
-
 
         try:
             user = User.objects.get(id=request.user.id)
@@ -957,7 +917,6 @@ class TestEmployeeManagementView(APIView):
 class SendResetPasswordView(APIView):
     permission_classes = [IsAuthenticated]
     def get(self, request):
-        print(request.GET.get("id"))
         id = request.GET.get("id")
         if not id:
             return Response({"error": "data is required"}, status=status.HTTP_400_BAD_REQUEST)
@@ -994,36 +953,6 @@ class UserInfoView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
-
-        auth_header = request.META.get('HTTP_AUTHORIZATION')
-        if auth_header and auth_header.startswith('Bearer '):
-            token = auth_header.split(' ')[1]
-            try:
-                # Decode the token to get payload
-                
-                untyped_token = UntypedToken(token)
-                exp_timestamp = untyped_token.payload.get('exp')
-                
-                if exp_timestamp:
-                    exp_datetime = datetime.fromtimestamp(exp_timestamp)
-                    print(f"Token expires at: {exp_datetime}")
-                    print(f"Token expires at (UTC): {datetime.utcfromtimestamp(exp_timestamp)}")
-                    
-                    # Calculate remaining time
-                    current_time = datetime.utcnow()
-                    remaining_time = exp_datetime - current_time
-                    print(f"Time remaining: {remaining_time}")
-                    
-                else:
-                    print("No expiry time found in token")
-                    
-            except (InvalidToken, TokenError) as e:
-                print(f"Invalid token: {e}")
-            except Exception as e:
-                print(f"Error decoding token: {e}")
-        else:
-            print("No authorization header or invalid format")
-        
         user = User.objects.get(id=request.user.id)
         image_url = None
 
@@ -1071,7 +1000,6 @@ class UserInfoView(APIView):
             response_data["user"]["company_name"] =  business_info.company_name
 
 
-        print(response_data)
         
 
         return Response(response_data, status=200)
@@ -1087,7 +1015,6 @@ class UpdateUserView(APIView):
         user = request.user
         data = request.data
 
-        print("Update payload:", data)
 
 
         # Parse business_info properly
@@ -1169,7 +1096,7 @@ class DeleteUsersByIdsView(APIView):
 class LogoutView(APIView):
     permission_classes = [IsAuthenticated]
 
-    def post(self, request):
+    def delete(self, request):
         # refresh_token = request.data.get('refresh')
         # if not refresh_token:
         #     return Response({"error": "Refresh token required."}, status=400)
@@ -1275,7 +1202,6 @@ class ResetPasswordView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
-        print(request.data)
         current_password = request.data.get('current_password')
         new_password = request.data.get('new_password')
 
@@ -1309,8 +1235,6 @@ class RegisterFCMTokenView(APIView):
         token = request.data.get("token")
         platform = request.data.get("platform", "Android")
 
-        print("Register FCM payload:", request.data)
-        print("User:", request.user.email)
         if not token:
             return Response({"error": "Token is required"}, status=400)
 
@@ -1329,3 +1253,412 @@ class UnregisterFCMTokenView(APIView):
         if token:
             Device.objects.filter(user=request.user, token=token).delete()
         return Response({"message": "Token removed"})
+
+
+# ==========================================
+# REVIEW MANAGEMENT APIS
+# ==========================================
+class ReviewManagementView(APIView):
+    """
+    Handle review operations: Create, List, Update, Delete
+    """
+    permission_classes = [IsAuthenticated]
+    
+    def post(self, request):
+        """Create a new review (Solo users only)"""
+        from .serializers import ReviewSerializer
+        
+        # if request.user.role != 'solo':
+        #     return Response({"error": "Only solo users can create reviews"}, status=403)
+        
+        serializer = ReviewSerializer(data=request.data, context={'request': request})
+        if serializer.is_valid():
+            review = serializer.save()
+            return Response({
+                "message": "Review created successfully",
+                "review": ReviewSerializer(review, context={'request': request}).data
+            }, status=201)
+        
+        return Response({"error": serializer.errors}, status=400)
+    
+    def get(self, request):
+        """List reviews - different behavior based on user role"""
+        from .serializers import ReviewSerializer, BusinessReviewListSerializer
+        
+        business_id = request.GET.get('business_id')
+        
+        if request.user.role == 'solo':
+            if business_id:
+                # Solo user wants to see all reviews for a specific business
+                try:
+                    business = User.objects.get(id=business_id, role='company')
+                except User.DoesNotExist:
+                    return Response({"error": "Business not found"}, status=404)
+                
+                # Get all reviews for this business
+                reviews = Review.objects.filter(business=business)
+                
+                # Check if current user has reviewed this business
+                user_review = reviews.filter(review_by=request.user).first()
+                
+                # Pagination
+                page = int(request.GET.get('page', 1))
+                limit = int(request.GET.get('limit', 10))
+                offset = (page - 1) * limit
+                
+                total_reviews = reviews.count()
+                paginated_reviews = reviews[offset:offset + limit]
+                
+                # Serialize reviews with context to identify user's own review
+                serialized_reviews = []
+                for review in paginated_reviews:
+                    review_data = BusinessReviewListSerializer(review).data
+                    # Add flag to identify if this is the current user's review
+                    review_data['is_my_review'] = (review.review_by.id == request.user.id)
+                    review_data['can_edit'] = (review.review_by.id == request.user.id)
+                    serialized_reviews.append(review_data)
+                
+                # Calculate statistics
+                stats = reviews.aggregate(
+                    avg_rating=models.Avg('review_rating'),
+                    total_reviews=models.Count('id'),
+                    five_star=models.Count('id', filter=models.Q(review_rating=5)),
+                    four_star=models.Count('id', filter=models.Q(review_rating=4)),
+                    three_star=models.Count('id', filter=models.Q(review_rating=3)),
+                    two_star=models.Count('id', filter=models.Q(review_rating=2)),
+                    one_star=models.Count('id', filter=models.Q(review_rating=1)),
+                )
+                
+                business_info = {
+                    "id": business.id,
+                    "name": business.business_info.company_name if hasattr(business, 'business_info') else business.full_name or business.email,
+                    "email": business.email
+                }
+                
+                return Response({
+                    "business": business_info,
+                    "reviews": serialized_reviews,
+                    "user_review_status": {
+                        "has_reviewed": user_review is not None,
+                        "user_review_id": user_review.id if user_review else None,
+                        "can_review": user_review is None,  # Can create new review if hasn't reviewed yet
+                        "can_edit": user_review is not None  # Can edit if already reviewed
+                    },
+                    "pagination": {
+                        "page": page,
+                        "limit": limit,
+                        "total": total_reviews,
+                        "has_next": offset + limit < total_reviews,
+                        "has_previous": page > 1
+                    },
+                    "statistics": {
+                        "average_rating": round(stats['avg_rating'], 2) if stats['avg_rating'] else 0,
+                        "total_reviews": stats['total_reviews'],
+                        "rating_breakdown": {
+                            "5_star": stats['five_star'],
+                            "4_star": stats['four_star'],
+                            "3_star": stats['three_star'],
+                            "2_star": stats['two_star'],
+                            "1_star": stats['one_star'],
+                        }
+                    }
+                })
+            else:
+                # Solo users see their own reviews (existing functionality)
+                reviews = Review.objects.filter(review_by=request.user)
+                serializer = ReviewSerializer(reviews, many=True, context={'request': request})
+                
+                return Response({
+                    "message": "Your reviews retrieved successfully",
+                    "reviews": serializer.data,
+                    "count": reviews.count()
+                })
+            
+        elif request.user.role == 'company':
+            # Companies see reviews about their business
+            reviews = Review.objects.filter(business=request.user)
+            serializer = BusinessReviewListSerializer(reviews, many=True)
+            
+            # Calculate average rating
+            avg_rating = reviews.aggregate(
+                avg_rating=models.Avg('review_rating')
+            )['avg_rating']
+            
+            return Response({
+                "message": "Reviews for your business retrieved successfully",
+                "reviews": serializer.data,
+                "count": reviews.count(),
+                "average_rating": round(avg_rating, 2) if avg_rating else 0
+            })
+        
+        else:
+            return Response({"error": "Unauthorized access"}, status=403)
+    
+    def put(self, request):
+        """Update an existing review (Only review author can edit)"""
+        from .serializers import ReviewSerializer
+        
+        review_id = request.data.get('review_id')
+        if not review_id:
+            return Response({"error": "Review ID is required"}, status=400)
+        
+        try:
+            review = Review.objects.get(id=review_id)
+        except Review.DoesNotExist:
+            return Response({"error": "Review not found"}, status=404)
+        
+        # Check if the current user is the author of the review
+        if review.review_by != request.user:
+            return Response({"error": "You can only edit your own reviews"}, status=403)
+        
+        # Check if user is trying to change the business (not allowed)
+        if 'business' in request.data or 'business_id' in request.data:
+            return Response({"error": "Cannot change the business for an existing review"}, status=400)
+        
+        serializer = ReviewSerializer(review, data=request.data, partial=True, context={'request': request})
+        if serializer.is_valid():
+            updated_review = serializer.save()
+            return Response({
+                "message": "Review updated successfully",
+                "review": ReviewSerializer(updated_review, context={'request': request}).data
+            }, status=200)
+        
+        return Response({"error": serializer.errors}, status=400)
+    
+    def delete(self, request):
+        """Delete a review (Only review author can delete)"""
+        review_id = request.data.get('review_id') or request.GET.get('review_id')
+        if not review_id:
+            return Response({"error": "Review ID is required"}, status=400)
+        
+        try:
+            review = Review.objects.get(id=review_id)
+        except Review.DoesNotExist:
+            return Response({"error": "Review not found"}, status=404)
+        
+        # Check if the current user is the author of the review
+        if review.review_by != request.user:
+            return Response({"error": "You can only delete your own reviews"}, status=403)
+        
+        business_name = review.business.business_info.company_name if hasattr(review.business, 'business_info') else review.business.full_name
+        review.delete()
+        
+        return Response({
+            "message": f"Review for {business_name} deleted successfully"
+        }, status=200)
+
+
+
+
+class BusinessReviewsView(APIView):
+    """
+    Public endpoint to get reviews for a specific business
+    """
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request, business_id):
+        """Get all reviews for a specific business"""
+        from django.db import models
+        from django.utils import timezone
+        from utils.storage_backends import generate_presigned_url
+        
+        try:
+            business = User.objects.get(id=business_id, role='company')
+        except User.DoesNotExist:
+            return Response({"error": "Business not found"}, status=404)
+        
+        reviews = Review.objects.filter(business=business).select_related('review_by').prefetch_related('images')
+        
+        # Pagination
+        page = int(request.GET.get('page', 1))
+        limit = int(request.GET.get('limit', 10))
+        offset = (page - 1) * limit
+        
+        total_reviews = reviews.count()
+        paginated_reviews = reviews[offset:offset + limit]
+        
+        # Calculate statistics
+        stats = reviews.aggregate(
+            avg_rating=models.Avg('review_rating'),
+            total_reviews=models.Count('id'),
+            five_star=models.Count('id', filter=models.Q(review_rating=5)),
+            four_star=models.Count('id', filter=models.Q(review_rating=4)),
+            three_star=models.Count('id', filter=models.Q(review_rating=3)),
+            two_star=models.Count('id', filter=models.Q(review_rating=2)),
+            one_star=models.Count('id', filter=models.Q(review_rating=1)),
+        )
+        
+        # Manually create review data
+        reviews_data = []
+        for review in paginated_reviews:
+            # Calculate time ago
+            time_diff = timezone.now() - review.created_at
+            if time_diff.days > 0:
+                if time_diff.days == 1:
+                    time_ago = "1 day ago"
+                elif time_diff.days < 30:
+                    time_ago = f"{time_diff.days} days ago"
+                elif time_diff.days < 365:
+                    months = time_diff.days // 30
+                    time_ago = f"{months} month{'s' if months > 1 else ''} ago"
+                else:
+                    years = time_diff.days // 365
+                    time_ago = f"{years} year{'s' if years > 1 else ''} ago"
+            elif time_diff.seconds > 3600:
+                hours = time_diff.seconds // 3600
+                time_ago = f"{hours} hour{'s' if hours > 1 else ''} ago"
+            elif time_diff.seconds > 60:
+                minutes = time_diff.seconds // 60
+                time_ago = f"{minutes} minute{'s' if minutes > 1 else ''} ago"
+            else:
+                time_ago = "Just now"
+            
+            # Get reviewer image URL
+            reviewer_image_url = None
+            if review.review_by.image:
+                try:
+                    if str(review.review_by.image).startswith(('http://', 'https://')):
+                        reviewer_image_url = str(review.review_by.image)
+                    else:
+                        reviewer_image_url = generate_presigned_url(f"media/{review.review_by.image}", expires_in=3600)
+                except (ValueError, FileNotFoundError):
+                    reviewer_image_url = None
+            
+            # Get review images (max 3)
+            review_gallery = []
+            review_images = review.images.all()[:3]  # Limit to 3 images
+            for img in review_images:
+                try:
+                    if str(img.image).startswith(('http://', 'https://')):
+                        image_url = str(img.image)
+                    else:
+                        image_url = generate_presigned_url(f"media/{img.image}", expires_in=3600)
+                    
+                    review_gallery.append({
+                        "id": img.id,
+                        "image_url": image_url,
+                        "uploaded_at": img.uploaded_at.isoformat() if img.uploaded_at else None
+                    })
+                except (ValueError, FileNotFoundError):
+                    continue
+            
+            review_data = {
+                "id": review.id,
+                "review_rating": review.review_rating,
+                "time_ago": time_ago,
+                "review_feedback": review.review_feedback,
+                "review_by": review.review_by.full_name or review.review_by.email,
+                "review_by_image": reviewer_image_url,
+                "review_gallery": review_gallery,
+                "user_id": review.review_by.id,
+                "created_at": review.created_at.isoformat(),
+                "updated_at": review.updated_at.isoformat() if review.updated_at else None
+            }
+            
+            reviews_data.append(review_data)
+        
+        business_info = {
+            "id": business.id,
+            "name": business.business_info.company_name if hasattr(business, 'business_info') else business.full_name or business.email,
+            "email": business.email
+        }
+        
+        return Response({
+            "business": business_info,
+            "reviews": reviews_data,
+            "pagination": {
+                "page": page,
+                "limit": limit,
+                "total": total_reviews,
+                "has_next": offset + limit < total_reviews,
+                "has_previous": page > 1
+            },
+            "statistics": {
+                "average_rating": round(stats['avg_rating'], 2) if stats['avg_rating'] else 0,
+                "total_reviews": stats['total_reviews'],
+                "rating_breakdown": {
+                    "5_star": stats['five_star'],
+                    "4_star": stats['four_star'],
+                    "3_star": stats['three_star'],
+                    "2_star": stats['two_star'],
+                    "1_star": stats['one_star'],
+                }
+            }
+        })
+
+
+
+
+
+class ReviewDetailView(APIView):
+    """
+    Get, update or delete a specific review
+    """
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request, review_id):
+        """Get a specific review by ID"""
+        from .serializers import ReviewSerializer
+        
+        try:
+            review = Review.objects.get(id=review_id)
+            serializer = ReviewSerializer(review, context={'request': request})
+            
+            # Add ownership flag if user is authenticated
+            review_data = serializer.data
+            if request.user.is_authenticated:
+                review_data['is_my_review'] = (review.review_by.id == request.user.id)
+                review_data['can_edit'] = (review.review_by.id == request.user.id)
+            
+            return Response({
+                "review": review_data
+            })
+        except Review.DoesNotExist:
+            return Response({"error": "Review not found"}, status=404)
+    
+    def put(self, request, review_id):
+        """Update a specific review (Only by review author)"""
+        from .serializers import ReviewSerializer
+        
+        try:
+            review = Review.objects.get(id=review_id)
+        except Review.DoesNotExist:
+            return Response({"error": "Review not found"}, status=404)
+        
+        # Check if the current user is the author of the review
+        if review.review_by != request.user:
+            return Response({"error": "You can only edit your own reviews"}, status=403)
+        
+        # Check if user is trying to change the business (not allowed)
+        if 'business' in request.data or 'business_id' in request.data:
+            return Response({"error": "Cannot change the business for an existing review"}, status=400)
+        
+        serializer = ReviewSerializer(review, data=request.data, partial=True, context={'request': request})
+        if serializer.is_valid():
+            updated_review = serializer.save()
+            return Response({
+                "message": "Review updated successfully",
+                "review": ReviewSerializer(updated_review, context={'request': request}).data
+            }, status=200)
+        
+        return Response({"error": serializer.errors}, status=400)
+    
+    def delete(self, request, review_id):
+        """Delete a specific review (Only by review author)"""
+        try:
+            review = Review.objects.get(id=review_id)
+        except Review.DoesNotExist:
+            return Response({"error": "Review not found"}, status=404)
+        
+        # Check if the current user is the author of the review
+        if review.review_by != request.user:
+            return Response({"error": "You can only delete your own reviews"}, status=403)
+        
+        business_name = review.business.business_info.company_name if hasattr(review.business, 'business_info') else review.business.full_name
+        review.delete()
+        
+        return Response({
+            "message": f"Review for {business_name} deleted successfully"
+        }, status=200)
+
+

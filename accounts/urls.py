@@ -19,6 +19,10 @@ from .views import (
     checkEmailExistsView,
     RegisterFCMTokenView,
     UnregisterFCMTokenView,
+    # Review views
+    ReviewManagementView,
+    BusinessReviewsView,
+    ReviewDetailView,
 )
 
 
@@ -54,5 +58,7 @@ urlpatterns = [
 
     path("push/register/", RegisterFCMTokenView.as_view()),
     path("push/unregister/", UnregisterFCMTokenView.as_view()),
+
+    
 
 ]

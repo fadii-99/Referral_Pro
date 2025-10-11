@@ -58,19 +58,7 @@ def send_referral_email(
     })
 
     # Plain text fallback
-    text_content = f"""
-    Hi {referred_to_name},
-
-    {referred_by_name} has referred you to {company_name} via ReferralPro.
-
-    Reason: {reason or 'No reason provided'}  
-    Notes: {request_description or 'No additional notes'}  
-
-    Log in to view details: https://thereferralpro.com/login
-
-    Regards,
-    ReferralPro Team
-    """
+    text_content = html_content
 
     msg = EmailMultiAlternatives(subject, text_content, from_email, [referred_to_email])
     msg.attach_alternative(html_content, "text/html")

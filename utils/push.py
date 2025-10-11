@@ -35,11 +35,11 @@ def send_push_notification_to_user(user, title, body, data=None):
         print(f"\n\n Preparing to send push notification to user {user.id}")
         
         # Get only OFFLINE devices for the user to prevent duplicate notifications
-        offline_devices = Device.objects.filter(user=user, is_online=False)
+        offline_devices = Device.objects.filter(user=user)
         
-        if not offline_devices.exists():
-            print(f"⚠️  User {user.id} has no offline devices - skipping push notification")
-            return {"info": "User has no offline devices", "success": 0, "failure": 0}
+        # if not offline_devices.exists():
+        #     print(f"⚠️  User {user.id} has no offline devices - skipping push notification")
+        #     return {"info": "User has no offline devices", "success": 0, "failure": 0}
 
         print(f"User {user.id} has {offline_devices.count()} offline devices")
 

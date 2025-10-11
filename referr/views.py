@@ -14,7 +14,7 @@ from django.db.models import Sum
 # models
 from accounts.models import BusinessInfo
 from .models import Referral, ReferralAssignment, ReferralReward
-from accounts.models import User, BusinessInfo, FavoriteCompany
+from accounts.models import User, BusinessInfo, FavoriteCompany, Review, ReviewImage
 
 # utils
 from utils.email_service import send_app_download_email, send_referral_email
@@ -22,6 +22,8 @@ from utils.twilio_service import TwilioService
 from utils.storage_backends import generate_presigned_url
 from utils.notify import notify_users
 from utils.activity import log_activity
+from utils.push import send_push_notification_to_user
+
 
 
 def IMAGEURL(image_path):
@@ -124,12 +126,15 @@ class DashboardStatsView(APIView):
 
 
 
-
 class ListCompaniesView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
         """List all companies with favorite status for current user"""
+        from django.db import models
+        from django.utils import timezone
+        from utils.storage_backends import generate_presigned_url
+        
         companies = User.objects.filter(role='company').exclude(id=request.user.id).select_related('business_info')
         
         # Get user's favorite company IDs
@@ -137,8 +142,6 @@ class ListCompaniesView(APIView):
             FavoriteCompany.objects.filter(user=request.user).values_list('company_id', flat=True)
         )
 
-        
-        
         companies_list = []
         for company in companies:
             image_url = None
@@ -153,6 +156,7 @@ class ListCompaniesView(APIView):
                 "image": image_url,
                 "is_favorite": company.id in favorite_company_ids
             }
+            
             if hasattr(company, 'business_info'):
                 business_info = company.business_info
                 company_data.update({
@@ -168,14 +172,100 @@ class ListCompaniesView(APIView):
                     "us_state": business_info.us_state,
                 })
             
+            # Get reviews data for this company
+            company_reviews = Review.objects.filter(business=company).select_related('review_by').prefetch_related('images')
+            
+            # Total reviews count
+            total_reviews = company_reviews.count()
+            
+            # Calculate average rating
+            avg_rating = company_reviews.aggregate(
+                avg_rating=models.Avg('review_rating')
+            )['avg_rating']
+            
+            # Get latest 3 reviews
+            latest_reviews = company_reviews.order_by('-created_at')[:3]
+            
+            reviews_data = []
+            for review in latest_reviews:
+                # Calculate time ago
+                time_diff = timezone.now() - review.created_at
+                if time_diff.days > 0:
+                    if time_diff.days == 1:
+                        time_ago = "1 day ago"
+                    elif time_diff.days < 30:
+                        time_ago = f"{time_diff.days} days ago"
+                    elif time_diff.days < 365:
+                        months = time_diff.days // 30
+                        time_ago = f"{months} month{'s' if months > 1 else ''} ago"
+                    else:
+                        years = time_diff.days // 365
+                        time_ago = f"{years} year{'s' if years > 1 else ''} ago"
+                elif time_diff.seconds > 3600:
+                    hours = time_diff.seconds // 3600
+                    time_ago = f"{hours} hour{'s' if hours > 1 else ''} ago"
+                elif time_diff.seconds > 60:
+                    minutes = time_diff.seconds // 60
+                    time_ago = f"{minutes} minute{'s' if minutes > 1 else ''} ago"
+                else:
+                    time_ago = "Just now"
+                
+                # Get reviewer image URL
+                reviewer_image_url = None
+                if review.review_by.image:
+                    try:
+                        if str(review.review_by.image).startswith(('http://', 'https://')):
+                            reviewer_image_url = str(review.review_by.image)
+                        else:
+                            reviewer_image_url = generate_presigned_url(f"media/{review.review_by.image}", expires_in=3600)
+                    except (ValueError, FileNotFoundError):
+                        reviewer_image_url = None
+                
+                # Get review images (max 3)
+                review_gallery = []
+                review_images = review.images.all()[:3]
+                for img in review_images:
+                    try:
+                        if str(img.image).startswith(('http://', 'https://')):
+                            image_url = str(img.image)
+                        else:
+                            image_url = generate_presigned_url(f"media/{img.image}", expires_in=3600)
+                        
+                        review_gallery.append({
+                            "id": img.id,
+                            "image_url": image_url,
+                            "uploaded_at": img.uploaded_at.isoformat() if img.uploaded_at else None
+                        })
+                    except (ValueError, FileNotFoundError):
+                        continue
+                
+                reviews_data.append({
+                    "id": review.id,
+                    "review_rating": review.review_rating,
+                    "time_ago": time_ago,
+                    "review_feedback": review.review_feedback,
+                    "review_by": review.review_by.full_name or review.review_by.email,
+                    "review_by_image": reviewer_image_url,
+                    "review_gallery": review_gallery,
+                    "user_id": review.review_by.id,
+                    "created_at": review.created_at.isoformat(),
+                })
+            
+            # Add reviews data to company_data
+            company_data.update({
+                "total_reviews": total_reviews,
+                "average_rating": round(avg_rating, 2) if avg_rating else 0,
+                "latest_reviews": reviews_data
+            })
+            
             companies_list.append(company_data)
 
-        
         return Response({
             "message": "Companies retrieved successfully",
             "companies": companies_list,
             "total": len(companies_list)
         }, status=status.HTTP_200_OK)
+
 
 
 class FavoriteCompanyView(APIView):
@@ -306,6 +396,31 @@ class SendReferralView(APIView):
                 },
             )
 
+
+            notification_data = {}
+
+
+            print(f"\n\n Preparing to send push notifications for referral ID {referral.id}")
+
+
+            notification_body = f"{request.user.full_name} referred you to {company.company_name if company.company_name else COMPANY.full_name}"
+            send_push_notification_to_user(
+                user=request.user,
+                title=f"New Referral from {request.user.full_name}",
+                body=notification_body,
+                data=notification_data
+            )
+
+            notification_body = f"{request.user.full_name} sent a referral to {referral.referred_to.full_name}"
+            send_push_notification_to_user(
+                user=referral.referred_to,
+                title=f"New Referral to {request.user.full_name}",
+                body=notification_body,
+                data=notification_data
+            )
+
+            print(f"Referral created with ID: {referral.id} and Reference ID: {referral.reference_id}")
+
             send_referral_email(
                 referred_to_email=referred_to_email,
                 referred_to_name=referred_to_name,
@@ -324,6 +439,7 @@ class SendReferralView(APIView):
                     referred_by_name=request.user.full_name,
                     reason=reason,
                     request_description=request_description,
+                    referral_code=referral.referred_by.referral_code
                 )
 
 
@@ -455,6 +571,16 @@ class AssignRepView(APIView):
                 "company_approval": referral_obj.company_approval,
                 "note": note,
             },
+        )
+
+        notification_data = {}
+
+        notification_body = f"you have been assigned to referral #{referral_obj.reference_id}"
+        send_push_notification_to_user(
+            user=employee,
+            title=f"New Referral Assigned #{referral_obj.reference_id}",
+            body=notification_body,
+            data=notification_data
         )
 
         try:
@@ -1014,6 +1140,34 @@ class SendAcceptView(APIView):
             meta={"approval": bool(approval)},
         )
 
+
+        print(f"\n\n Preparing to send push notifications for referral ID {referral.id}")
+
+        notification_data = {}
+        try:
+
+            notification_body = f"{referral.referred_to.full_name} accepted the referral #{referral.reference_id}"
+            send_push_notification_to_user(
+                user=referral.company,
+                title=f"Referral Accepted #{referral.reference_id}",
+                body=notification_body,
+                data=notification_data
+            )
+
+            notification_body = f"{referral.referred_to.full_name} accepted the referral #{referral.reference_id}"
+            send_push_notification_to_user(
+                user=referral.referred_by,
+                title=f"Referral Accepted #{referral.reference_id}",
+                body=notification_body,
+                data=notification_data
+            )
+
+        except Exception as e:
+            print(f"Error sending push notification: {str(e)}")
+        print(f"Referral {referral.id} accepted by {referral.referred_to.full_name}")
+
+
+
         payload = {
             "event": "referral.friend_accepted",
             "unread": True,
@@ -1089,14 +1243,15 @@ class CompleteReferralView(APIView):
                 },
             )
 
+
             # Payload for company - employee completed referral
             payload_company = {
                 "event": "referral.completed",
                 "unread": True,
                 "referral_id": referral.id,
                 "reference_id": referral.reference_id,
-                "title": "Referral Completed",
-                "message": f"{request.user.full_name} completed the referral #{referral.reference_id}",
+                "title": f"Referral {status_value}",
+                "message": f"{request.user.full_name} {status_value} the referral #{referral.reference_id}",
                 "actors": {
                     "referred_by_id": referral.referred_by.id,
                     "referred_to_id": referral.referred_to.id,
@@ -1117,8 +1272,8 @@ class CompleteReferralView(APIView):
                 "unread": True,
                 "referral_id": referral.id,
                 "reference_id": referral.reference_id,
-                "title": "Referral Completed",
-                "message": f"{referral.company.full_name} has completed the referral #{referral.reference_id}",
+                "title": f"Referral {status_value}",
+                "message": f"{referral.company.full_name} has {status_value} the referral #{referral.reference_id}",
                 "actors": {
                     "referred_by_id": referral.referred_by.id,
                     "referred_to_id": referral.referred_to.id,
@@ -1132,6 +1287,17 @@ class CompleteReferralView(APIView):
                     "status": referral.status,
                 }
             }
+
+            if status_value == "completed":
+                notification_data = {}
+
+                notification_body = f"Referral Completed #{referral.reference_id}"
+                send_push_notification_to_user(
+                    user=referral.company,
+                    title=f"Referral Completed #{referral.reference_id}",
+                    body=notification_body,
+                    data=notification_data
+                )
 
             # Send different notifications to different users
             notify_users([referral.company.id], payload_company)

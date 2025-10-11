@@ -52,7 +52,7 @@ class TwilioService:
 
 
     @classmethod
-    def send_referral_sms(cls, phone_number: str, referred_to_name: str, company_name: str, referred_by_name: str,reason: str = None, request_description: str = None):
+    def send_referral_sms(cls, phone_number: str, referred_to_name: str, company_name: str, referred_by_name: str,reason: str = None, request_description: str = None, referral_code: str = None):
         """
         Send an SMS notification when a referral is created.
         """
@@ -67,7 +67,8 @@ class TwilioService:
                 f"Hi {referred_to_name}!\n\n"
                 f"{referred_by_name} has referred you to {company_name} via ReferralPro."
                 f"{reason_text}"
-                f"{description_text}\n\n"
+                f"{description_text}\n"
+                f"Referral Code: {referral_code}\n\n"
                 "Regards,\nReferralPro Team"
             )
 
