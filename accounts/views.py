@@ -66,6 +66,22 @@ class checkEmailExistsView(APIView):
         return Response({"error": "Email exists, try another email"}, status=400)
         
 
+class checkPhoneExistsView(APIView):
+    permission_classes = [AllowAny]
+    authentication_classes = []
+
+    def post(self, request):
+        phone = request.data.get("phone")
+        print(phone)
+        if not phone:
+            return Response({"error": "Phone is required"}, status=400)
+
+        exists = User.objects.filter(phone=phone).exists()
+        if not exists:
+            return Response({"message": "Success"}, status=200)
+        return Response({"error": "Phone exists, try another phone"}, status=400)
+        
+
 # -------------------------
 # Manual signup/login (Solo)
 # -------------------------
@@ -1266,59 +1282,159 @@ class ReviewManagementView(APIView):
     
     def post(self, request):
         """Create a new review (Solo users only)"""
-        from .serializers import ReviewSerializer
+        print(request.data)
         
         # if request.user.role != 'solo':
         #     return Response({"error": "Only solo users can create reviews"}, status=403)
         
-        serializer = ReviewSerializer(data=request.data, context={'request': request})
-        if serializer.is_valid():
-            review = serializer.save()
+        # Extract data from request
+        business_id = request.data.get('business_id')
+        review_rating = request.data.get('review_rating')
+        review_feedback = request.data.get('review_feedback', '')
+        
+        # Validation
+        if not business_id:
+            return Response({"error": "Business ID is required"}, status=400)
+        
+        if not review_rating:
+            return Response({"error": "Review rating is required"}, status=400)
+        
+        try:
+            review_rating = int(review_rating)
+            if review_rating < 1 or review_rating > 5:
+                return Response({"error": "Review rating must be between 1 and 5"}, status=400)
+        except (ValueError, TypeError):
+            return Response({"error": "Review rating must be a valid number"}, status=400)
+        
+        # Check if business exists
+        try:
+            business = User.objects.get(id=business_id, role='company')
+        except User.DoesNotExist:
+            return Response({"error": "Business not found"}, status=404)
+        
+        # Check if user already reviewed this business
+        existing_review = Review.objects.filter(review_by=request.user, business=business).first()
+        if existing_review:
+            return Response({"error": "You have already reviewed this business"}, status=400)
+        
+        try:
+            # Create the review
+            review = Review.objects.create(
+                business=business,
+                review_by=request.user,
+                review_rating=review_rating,
+                review_feedback=review_feedback
+            )
+            
+            # Handle image uploads if any
+            images = request.FILES.getlist('images')
+            review_images = []
+            
+            for image in images:
+                review_image = ReviewImage.objects.create(
+                    review=review,
+                    image=image
+                )
+                review_images.append({
+                    "id": review_image.id,
+                    "image_url": generate_presigned_url(f"media/{review_image.image}", expires_in=3600) if review_image.image else None
+                })
+            
+            # Prepare response data
+            business_name = business.business_info.company_name if hasattr(business, 'business_info') else business.full_name or business.email
+            reviewer_image_url = None
+            
+            if request.user.image:
+                try:
+                    if str(request.user.image).startswith(('http://', 'https://')):
+                        reviewer_image_url = str(request.user.image)
+                    else:
+                        reviewer_image_url = generate_presigned_url(f"media/{request.user.image}", expires_in=3600)
+                except (ValueError, FileNotFoundError):
+                    reviewer_image_url = None
+            
+            review_data = {
+                "id": review.id,
+                "business": {
+                    "id": business.id,
+                    "name": business_name,
+                    "email": business.email
+                },
+                "review_by": {
+                    "id": request.user.id,
+                    "name": request.user.full_name or request.user.email,
+                    "image": reviewer_image_url
+                },
+                "review_rating": review.review_rating,
+                "review_feedback": review.review_feedback,
+                "images": review_images,
+                "created_at": review.created_at.isoformat(),
+                "updated_at": review.updated_at.isoformat() if review.updated_at else None
+            }
+            
             return Response({
                 "message": "Review created successfully",
-                "review": ReviewSerializer(review, context={'request': request}).data
+                "review": review_data
             }, status=201)
-        
-        return Response({"error": serializer.errors}, status=400)
+            
+        except Exception as e:
+            print(str(e))
+            return Response({"error": f"Failed to create review: {str(e)}"}, status=500)
     
     def get(self, request):
         """List reviews - different behavior based on user role"""
         from .serializers import ReviewSerializer, BusinessReviewListSerializer
         
         business_id = request.GET.get('business_id')
+        print("Business ID:", business_id)
         
         if request.user.role == 'solo':
             if business_id:
-                # Solo user wants to see all reviews for a specific business
                 try:
                     business = User.objects.get(id=business_id, role='company')
                 except User.DoesNotExist:
                     return Response({"error": "Business not found"}, status=404)
-                
-                # Get all reviews for this business
-                reviews = Review.objects.filter(business=business)
-                
+
+                reviews = Review.objects.filter(business=business).select_related("review_by")
+                total_reviews = reviews.count()
+
                 # Check if current user has reviewed this business
                 user_review = reviews.filter(review_by=request.user).first()
-                
-                # Pagination
+
+                print("User Review:", user_review.user.full_name)
+
+                # Pagination params
                 page = int(request.GET.get('page', 1))
                 limit = int(request.GET.get('limit', 10))
                 offset = (page - 1) * limit
-                
-                total_reviews = reviews.count()
-                paginated_reviews = reviews[offset:offset + limit]
-                
-                # Serialize reviews with context to identify user's own review
+
+                # --- Ensure user's review appears first ---
+                if user_review:
+                    # All other reviews excluding current user's
+                    other_reviews = reviews.exclude(id=user_review.id).order_by('-updated_at')
+
+                    if offset == 0:
+                        # First page: show user's review first
+                        remaining = limit - 1  # one slot reserved for user review
+                        other_page = list(other_reviews[:remaining])
+                        paginated_reviews = [user_review] + other_page
+                    else:
+                        # For next pages, offset shifts since user_review was already shown
+                        adj_offset = offset - 1
+                        paginated_reviews = list(other_reviews[adj_offset:adj_offset + limit])
+                else:
+                    # If user has not reviewed yet — normal pagination
+                    paginated_reviews = list(reviews.order_by('-updated_at')[offset:offset + limit])
+
+                # --- Serialize with flags ---
                 serialized_reviews = []
                 for review in paginated_reviews:
-                    review_data = BusinessReviewListSerializer(review).data
-                    # Add flag to identify if this is the current user's review
-                    review_data['is_my_review'] = (review.review_by.id == request.user.id)
-                    review_data['can_edit'] = (review.review_by.id == request.user.id)
-                    serialized_reviews.append(review_data)
-                
-                # Calculate statistics
+                    data = BusinessReviewListSerializer(review).data
+                    data["is_my_review"] = review.review_by_id == request.user.id
+                    data["can_edit"] = review.review_by_id == request.user.id
+                    serialized_reviews.append(data)
+
+                # --- Rating statistics ---
                 stats = reviews.aggregate(
                     avg_rating=models.Avg('review_rating'),
                     total_reviews=models.Count('id'),
@@ -1328,21 +1444,21 @@ class ReviewManagementView(APIView):
                     two_star=models.Count('id', filter=models.Q(review_rating=2)),
                     one_star=models.Count('id', filter=models.Q(review_rating=1)),
                 )
-                
+
                 business_info = {
                     "id": business.id,
-                    "name": business.business_info.company_name if hasattr(business, 'business_info') else business.full_name or business.email,
+                    "name": getattr(business.business_info, "company_name", business.full_name or business.email),
                     "email": business.email
                 }
-                
+
                 return Response({
                     "business": business_info,
                     "reviews": serialized_reviews,
                     "user_review_status": {
                         "has_reviewed": user_review is not None,
                         "user_review_id": user_review.id if user_review else None,
-                        "can_review": user_review is None,  # Can create new review if hasn't reviewed yet
-                        "can_edit": user_review is not None  # Can edit if already reviewed
+                        "can_review": user_review is None,
+                        "can_edit": user_review is not None
                     },
                     "pagination": {
                         "page": page,
@@ -1396,7 +1512,6 @@ class ReviewManagementView(APIView):
     
     def put(self, request):
         """Update an existing review (Only review author can edit)"""
-        from .serializers import ReviewSerializer
         
         review_id = request.data.get('review_id')
         if not review_id:
@@ -1415,15 +1530,111 @@ class ReviewManagementView(APIView):
         if 'business' in request.data or 'business_id' in request.data:
             return Response({"error": "Cannot change the business for an existing review"}, status=400)
         
-        serializer = ReviewSerializer(review, data=request.data, partial=True, context={'request': request})
-        if serializer.is_valid():
-            updated_review = serializer.save()
+        try:
+            # Update review rating if provided
+            if 'review_rating' in request.data:
+                rating = request.data.get('review_rating')
+                try:
+                    rating = int(rating)
+                    if rating < 1 or rating > 5:
+                        return Response({"error": "Review rating must be between 1 and 5"}, status=400)
+                    review.review_rating = rating
+                except (ValueError, TypeError):
+                    return Response({"error": "Review rating must be a valid number"}, status=400)
+            
+            # Update review feedback if provided
+            if 'review_feedback' in request.data:
+                review.review_feedback = request.data.get('review_feedback', '')
+            
+            # Save the review updates
+            review.save()
+            
+            # Handle image updates if provided
+            new_images = request.FILES.getlist('images')
+            if new_images:
+                # Optional: Remove existing images if replace_images flag is set
+                if request.data.get('replace_images', False):
+                    ReviewImage.objects.filter(review=review).delete()
+                
+                # Add new images
+                for image in new_images:
+                    ReviewImage.objects.create(
+                        review=review,
+                        image=image
+                    )
+            
+            # Handle removing specific images by ID
+            remove_image_ids = request.data.get('remove_image_ids', [])
+            if remove_image_ids:
+                if isinstance(remove_image_ids, str):
+                    try:
+                        remove_image_ids = [int(id.strip()) for id in remove_image_ids.split(',')]
+                    except ValueError:
+                        return Response({"error": "Invalid image IDs format"}, status=400)
+                
+                ReviewImage.objects.filter(
+                    review=review, 
+                    id__in=remove_image_ids
+                ).delete()
+            
+            # Prepare response data
+            reviewer_image_url = None
+            if review.review_by.image:
+                try:
+                    if str(review.review_by.image).startswith(('http://', 'https://')):
+                        reviewer_image_url = str(review.review_by.image)
+                    else:
+                        reviewer_image_url = generate_presigned_url(f"media/{review.review_by.image}", expires_in=3600)
+                except (ValueError, FileNotFoundError):
+                    reviewer_image_url = None
+            
+            # Get updated review images
+            review_images = []
+            for img in ReviewImage.objects.filter(review=review):
+                try:
+                    if str(img.image).startswith(('http://', 'https://')):
+                        image_url = str(img.image)
+                    else:
+                        image_url = generate_presigned_url(f"media/{img.image}", expires_in=3600)
+                    
+                    review_images.append({
+                        "id": img.id,
+                        "image_url": image_url,
+                        "uploaded_at": img.uploaded_at.isoformat() if img.uploaded_at else None
+                    })
+                except (ValueError, FileNotFoundError):
+                    continue
+            
+            business_name = review.business.business_info.company_name if hasattr(review.business, 'business_info') else review.business.full_name or review.business.email
+            
+            review_data = {
+                "id": review.id,
+                "business": {
+                    "id": review.business.id,
+                    "name": business_name,
+                    "email": review.business.email
+                },
+                "review_by": {
+                    "id": review.review_by.id,
+                    "name": review.review_by.full_name or review.review_by.email,
+                    "image": reviewer_image_url
+                },
+                "review_rating": review.review_rating,
+                "review_feedback": review.review_feedback,
+                "images": review_images,
+                "time_ago": review.time_ago(),
+                "created_at": review.created_at.isoformat(),
+                "updated_at": review.updated_at.isoformat() if review.updated_at else None,
+                "is_current_user_review": True  # Always true since only owner can edit
+            }
+            
             return Response({
                 "message": "Review updated successfully",
-                "review": ReviewSerializer(updated_review, context={'request': request}).data
+                "review": review_data
             }, status=200)
-        
-        return Response({"error": serializer.errors}, status=400)
+            
+        except Exception as e:
+            return Response({"error": f"Failed to update review: {str(e)}"}, status=500)
     
     def delete(self, request):
         """Delete a review (Only review author can delete)"""
@@ -1449,143 +1660,140 @@ class ReviewManagementView(APIView):
 
 
 
-
 class BusinessReviewsView(APIView):
     """
     Public endpoint to get reviews for a specific business
     """
     permission_classes = [IsAuthenticated]
-    
-    def get(self, request, business_id):
-        """Get all reviews for a specific business"""
-        from django.db import models
-        from django.utils import timezone
-        from utils.storage_backends import generate_presigned_url
-        
-        try:
-            business = User.objects.get(id=business_id, role='company')
-        except User.DoesNotExist:
-            return Response({"error": "Business not found"}, status=404)
-        
-        reviews = Review.objects.filter(business=business).select_related('review_by').prefetch_related('images')
-        
-        # Pagination
-        page = int(request.GET.get('page', 1))
-        limit = int(request.GET.get('limit', 10))
-        offset = (page - 1) * limit
-        
-        total_reviews = reviews.count()
-        paginated_reviews = reviews[offset:offset + limit]
-        
-        # Calculate statistics
-        stats = reviews.aggregate(
-            avg_rating=models.Avg('review_rating'),
-            total_reviews=models.Count('id'),
-            five_star=models.Count('id', filter=models.Q(review_rating=5)),
-            four_star=models.Count('id', filter=models.Q(review_rating=4)),
-            three_star=models.Count('id', filter=models.Q(review_rating=3)),
-            two_star=models.Count('id', filter=models.Q(review_rating=2)),
-            one_star=models.Count('id', filter=models.Q(review_rating=1)),
-        )
-        
-        # Manually create review data
-        reviews_data = []
-        for review in paginated_reviews:
-            # Calculate time ago
-            time_diff = timezone.now() - review.created_at
-            if time_diff.days > 0:
-                if time_diff.days == 1:
-                    time_ago = "1 day ago"
-                elif time_diff.days < 30:
-                    time_ago = f"{time_diff.days} days ago"
-                elif time_diff.days < 365:
-                    months = time_diff.days // 30
-                    time_ago = f"{months} month{'s' if months > 1 else ''} ago"
-                else:
-                    years = time_diff.days // 365
-                    time_ago = f"{years} year{'s' if years > 1 else ''} ago"
-            elif time_diff.seconds > 3600:
-                hours = time_diff.seconds // 3600
-                time_ago = f"{hours} hour{'s' if hours > 1 else ''} ago"
-            elif time_diff.seconds > 60:
-                minutes = time_diff.seconds // 60
-                time_ago = f"{minutes} minute{'s' if minutes > 1 else ''} ago"
-            else:
-                time_ago = "Just now"
-            
-            # Get reviewer image URL
-            reviewer_image_url = None
-            if review.review_by.image:
-                try:
-                    if str(review.review_by.image).startswith(('http://', 'https://')):
-                        reviewer_image_url = str(review.review_by.image)
-                    else:
-                        reviewer_image_url = generate_presigned_url(f"media/{review.review_by.image}", expires_in=3600)
-                except (ValueError, FileNotFoundError):
-                    reviewer_image_url = None
-            
-            # Get review images (max 3)
-            review_gallery = []
-            review_images = review.images.all()[:3]  # Limit to 3 images
-            for img in review_images:
-                try:
-                    if str(img.image).startswith(('http://', 'https://')):
-                        image_url = str(img.image)
-                    else:
-                        image_url = generate_presigned_url(f"media/{img.image}", expires_in=3600)
-                    
-                    review_gallery.append({
-                        "id": img.id,
-                        "image_url": image_url,
-                        "uploaded_at": img.uploaded_at.isoformat() if img.uploaded_at else None
-                    })
-                except (ValueError, FileNotFoundError):
-                    continue
-            
-            review_data = {
-                "id": review.id,
-                "review_rating": review.review_rating,
-                "time_ago": time_ago,
-                "review_feedback": review.review_feedback,
-                "review_by": review.review_by.full_name or review.review_by.email,
-                "review_by_image": reviewer_image_url,
-                "review_gallery": review_gallery,
-                "user_id": review.review_by.id,
-                "created_at": review.created_at.isoformat(),
-                "updated_at": review.updated_at.isoformat() if review.updated_at else None
-            }
-            
-            reviews_data.append(review_data)
-        
-        business_info = {
-            "id": business.id,
-            "name": business.business_info.company_name if hasattr(business, 'business_info') else business.full_name or business.email,
-            "email": business.email
-        }
-        
-        return Response({
-            "business": business_info,
-            "reviews": reviews_data,
-            "pagination": {
-                "page": page,
-                "limit": limit,
-                "total": total_reviews,
-                "has_next": offset + limit < total_reviews,
-                "has_previous": page > 1
-            },
-            "statistics": {
-                "average_rating": round(stats['avg_rating'], 2) if stats['avg_rating'] else 0,
-                "total_reviews": stats['total_reviews'],
-                "rating_breakdown": {
-                    "5_star": stats['five_star'],
-                    "4_star": stats['four_star'],
-                    "3_star": stats['three_star'],
-                    "2_star": stats['two_star'],
-                    "1_star": stats['one_star'],
-                }
-            }
-        })
 
+    def get(self, request, business_id):
+        try:
+            from django.db import models
+            from django.utils import timezone
+            from utils.storage_backends import generate_presigned_url
+
+            # ---- Fetch business ----
+            try:
+                business = User.objects.get(id=business_id, role="company")
+            except User.DoesNotExist:
+                return Response({"error": "Business not found"}, status=404)
+
+            # ---- Fetch all reviews for this business ----
+            reviews = Review.objects.filter(business=business).select_related("review_by")
+
+            # ---- Pagination setup ----
+            page = int(request.GET.get("page", 1))
+            limit = int(request.GET.get("limit", 10))
+            offset = (page - 1) * limit
+            total_reviews = reviews.count()
+
+            # ---- Ensure current user review is first ----
+            user_review = reviews.filter(review_by_id=request.user.id).first()
+            if user_review:
+                other_reviews = reviews.exclude(id=user_review.id).order_by("-created_at")
+                if offset == 0:
+                    remaining_slots = limit - 1  # first slot reserved for user's review
+                    paginated_reviews = [user_review] + list(other_reviews[:remaining_slots])
+                else:
+                    adjusted_offset = offset - 1  # shift pagination since first page had 1 extra
+                    paginated_reviews = list(other_reviews[adjusted_offset:adjusted_offset + limit])
+            else:
+                paginated_reviews = list(reviews.order_by("-created_at")[offset:offset + limit])
+
+            # ---- Statistics ----
+            stats = reviews.aggregate(
+                avg_rating=models.Avg("review_rating"),
+                total_reviews=models.Count("id"),
+                five_star=models.Count("id", filter=models.Q(review_rating=5)),
+                four_star=models.Count("id", filter=models.Q(review_rating=4)),
+                three_star=models.Count("id", filter=models.Q(review_rating=3)),
+                two_star=models.Count("id", filter=models.Q(review_rating=2)),
+                one_star=models.Count("id", filter=models.Q(review_rating=1)),
+            )
+
+            # ---- Helper: presign images ----
+            def _presigned_or_public(path):
+                if not path:
+                    return None
+                s = str(path)
+                if s.startswith(("http://", "https://")):
+                    return s
+                try:
+                    return generate_presigned_url(f"media/{s}", expires_in=3600)
+                except Exception:
+                    return None
+
+            # ---- Build review data ----
+            reviews_data = []
+            for review in paginated_reviews:
+                # Time ago using helper from model
+                time_ago = review.time_ago()
+
+                # Reviewer image
+                reviewer_image_url = _presigned_or_public(getattr(review.review_by, "image", None))
+
+                # Review images
+                review_gallery = []
+                try:
+                    for img in ReviewImage.objects.filter(review=review)[:3]:
+                        image_url = _presigned_or_public(img.image)
+                        if image_url:
+                            review_gallery.append({
+                                "id": img.id,
+                                "image_url": image_url,
+                                "uploaded_at": img.uploaded_at.isoformat() if img.uploaded_at else None,
+                            })
+                except Exception as e:
+                    print(f"Error fetching review images: {str(e)}")
+
+                reviews_data.append({
+                    "id": review.id,
+                    "review_rating": review.review_rating,
+                    "time_ago": time_ago,
+                    "review_feedback": review.review_feedback,
+                    "review_by": review.review_by.full_name or review.review_by.email,
+                    "review_by_image": reviewer_image_url,
+                    "review_gallery": review_gallery,
+                    "user_id": review.review_by.id,
+                    "created_at": review.created_at.isoformat(),
+                    "updated_at": review.updated_at.isoformat() if review.updated_at else None,
+                    "is_current_user_review": review.review_by_id == request.user.id,
+                })
+
+            # ---- Business info ----
+            business_info = {
+                "id": business.id,
+                "name": getattr(business.business_info, "company_name", business.full_name or business.email),
+                "email": business.email,
+            }
+
+            # ---- Response ----
+            return Response({
+                "business": business_info,
+                "reviews": reviews_data,
+                "pagination": {
+                    "page": page,
+                    "limit": limit,
+                    "total": total_reviews,
+                    "has_next": offset + limit < total_reviews,
+                    "has_previous": page > 1,
+                },
+                "statistics": {
+                    "average_rating": round(stats["avg_rating"], 2) if stats["avg_rating"] else 0,
+                    "total_reviews": stats["total_reviews"],
+                    "rating_breakdown": {
+                        "5_star": stats["five_star"],
+                        "4_star": stats["four_star"],
+                        "3_star": stats["three_star"],
+                        "2_star": stats["two_star"],
+                        "1_star": stats["one_star"],
+                    },
+                },
+            })
+
+        except Exception as e:
+            print(str(e))
+            return Response({"error": f"Failed to retrieve reviews: {str(e)}"}, status=500)
 
 
 

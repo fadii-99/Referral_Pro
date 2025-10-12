@@ -17,6 +17,7 @@ from .views import (
     ResetPasswordView,
     AccountDeletionView,
     checkEmailExistsView,
+    checkPhoneExistsView,
     RegisterFCMTokenView,
     UnregisterFCMTokenView,
     # Review views
@@ -38,7 +39,8 @@ urlpatterns = [
     path('send_otp/', SendOTPView.as_view(), name='send_otp'),
     path('verify_otp/', VerifyOTPView.as_view(), name='verify_otp'),
     path('reset_password/', CreateNewPasswordView.as_view(), name='reset_password'),
-    path('check_email/', checkEmailExistsView.as_view(), name='get_user'),
+    path('check_email/', checkEmailExistsView.as_view(), name='check_email'),
+    path('check_phone/', checkPhoneExistsView.as_view(), name='check_phone'),
 
     path('get_user/', UserInfoView.as_view(), name='get_user'),
     path('update_user/', UpdateUserView.as_view(), name='update_user'),

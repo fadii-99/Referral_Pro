@@ -39,6 +39,19 @@ def IMAGEURL(image_path):
     return image_url
 
 
+def _public_or_presigned(path_or_url: str) -> str | None:
+    """Return the same URL if it's already http(s), else presign S3 key under media/."""
+    if not path_or_url:
+        return None
+    try:
+        s = str(path_or_url)
+        if s.startswith(("http://", "https://")):
+            return s
+        return generate_presigned_url(f"media/{s}", expires_in=3600)
+    except (ValueError, FileNotFoundError):
+        return None
+
+
 
 class DashboardStatsView(APIView):
     permission_classes = [IsAuthenticated]
@@ -125,147 +138,138 @@ class DashboardStatsView(APIView):
             )
 
 
-
 class ListCompaniesView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        """List all companies with favorite status for current user"""
-        from django.db import models
-        from django.utils import timezone
-        from utils.storage_backends import generate_presigned_url
-        
-        companies = User.objects.filter(role='company').exclude(id=request.user.id).select_related('business_info')
-        
-        # Get user's favorite company IDs
-        favorite_company_ids = set(
-            FavoriteCompany.objects.filter(user=request.user).values_list('company_id', flat=True)
-        )
+        try:
+            """List all companies with favorite status and reviews (user review always on top if exists)"""
+            from django.db import models
+            from django.utils import timezone
+            from utils.storage_backends import generate_presigned_url
 
-        companies_list = []
-        for company in companies:
-            image_url = None
-            if company.image:
-                image_url = generate_presigned_url(f"media/{company.image}", expires_in=3600)
+            def _public_or_presigned(path_or_url):
+                """Return original URL if public, otherwise presigned S3 URL."""
+                if not path_or_url:
+                    return None
+                try:
+                    s = str(path_or_url)
+                    if s.startswith(("http://", "https://")):
+                        return s
+                    return generate_presigned_url(f"media/{s}", expires_in=3600)
+                except (ValueError, FileNotFoundError):
+                    return None
 
-            company_data = {
-                "id": company.id,
-                "email": company.email,
-                "full_name": company.full_name,
-                "phone": company.phone,
-                "image": image_url,
-                "is_favorite": company.id in favorite_company_ids
-            }
-            
-            if hasattr(company, 'business_info'):
-                business_info = company.business_info
-                company_data.update({
-                    "company_name": business_info.company_name,
-                    "industry": business_info.industry,
-                    "employees": business_info.employees,
-                    "business_type": business_info.biz_type,
-                    "address1": business_info.address1,
-                    "address2": business_info.address2,
-                    "city": business_info.city,
-                    "post_code": business_info.post_code,
-                    "website": business_info.website,
-                    "us_state": business_info.us_state,
-                })
-            
-            # Get reviews data for this company
-            company_reviews = Review.objects.filter(business=company).select_related('review_by').prefetch_related('images')
-            
-            # Total reviews count
-            total_reviews = company_reviews.count()
-            
-            # Calculate average rating
-            avg_rating = company_reviews.aggregate(
-                avg_rating=models.Avg('review_rating')
-            )['avg_rating']
-            
-            # Get latest 3 reviews
-            latest_reviews = company_reviews.order_by('-created_at')[:3]
-            
-            reviews_data = []
-            for review in latest_reviews:
-                # Calculate time ago
-                time_diff = timezone.now() - review.created_at
-                if time_diff.days > 0:
-                    if time_diff.days == 1:
-                        time_ago = "1 day ago"
-                    elif time_diff.days < 30:
-                        time_ago = f"{time_diff.days} days ago"
-                    elif time_diff.days < 365:
-                        months = time_diff.days // 30
-                        time_ago = f"{months} month{'s' if months > 1 else ''} ago"
-                    else:
-                        years = time_diff.days // 365
-                        time_ago = f"{years} year{'s' if years > 1 else ''} ago"
-                elif time_diff.seconds > 3600:
-                    hours = time_diff.seconds // 3600
-                    time_ago = f"{hours} hour{'s' if hours > 1 else ''} ago"
-                elif time_diff.seconds > 60:
-                    minutes = time_diff.seconds // 60
-                    time_ago = f"{minutes} minute{'s' if minutes > 1 else ''} ago"
+            companies = (
+                User.objects.filter(role="company")
+                .exclude(id=request.user.id)
+                .select_related("business_info")
+            )
+
+            # User's favorite companies
+            favorite_company_ids = set(
+                FavoriteCompany.objects.filter(user=request.user).values_list("company_id", flat=True)
+            )
+
+            companies_list = []
+            for company in companies:
+                # --- Basic info ---
+                image_url = _public_or_presigned(company.image)
+
+                company_data = {
+                    "id": company.id,
+                    "email": company.email,
+                    "full_name": company.full_name,
+                    "phone": company.phone,
+                    "image": image_url,
+                    "is_favorite": company.id in favorite_company_ids,
+                }
+
+                # --- Business info ---
+                if hasattr(company, "business_info"):
+                    biz = company.business_info
+                    company_data.update({
+                        "company_name": biz.company_name,
+                        "industry": biz.industry,
+                        "employees": biz.employees,
+                        "business_type": biz.biz_type,
+                        "address1": biz.address1,
+                        "address2": biz.address2,
+                        "city": biz.city,
+                        "post_code": biz.post_code,
+                        "website": biz.website,
+                        "us_state": biz.us_state,
+                    })
+
+                # --- Reviews ---
+                company_reviews = Review.objects.filter(business=company).select_related("review_by")
+
+                total_reviews = company_reviews.count()
+                avg_rating = company_reviews.aggregate(avg_rating=models.Avg("review_rating"))["avg_rating"]
+
+                # Ensure current user's review is first if exists
+                user_review = company_reviews.filter(review_by_id=request.user.id).first()
+
+                if user_review:
+                    # Always fetch 2 more latest reviews excluding user’s
+                    other_reviews = (
+                        company_reviews.exclude(id=user_review.id)
+                        .order_by('-created_at')[:2]
+                    )
+                    latest_reviews = [user_review] + list(other_reviews)
                 else:
-                    time_ago = "Just now"
-                
-                # Get reviewer image URL
-                reviewer_image_url = None
-                if review.review_by.image:
+                    # No review from current user
+                    latest_reviews = list(company_reviews.order_by('-created_at')[:3])
+
+                reviews_data = []
+                for review in latest_reviews:
+                    reviewer_image = _public_or_presigned(review.review_by.image) if getattr(review.review_by, "image", None) else None
+
+                    # Review images (max 3)
+                    review_gallery = []
                     try:
-                        if str(review.review_by.image).startswith(('http://', 'https://')):
-                            reviewer_image_url = str(review.review_by.image)
-                        else:
-                            reviewer_image_url = generate_presigned_url(f"media/{review.review_by.image}", expires_in=3600)
-                    except (ValueError, FileNotFoundError):
-                        reviewer_image_url = None
-                
-                # Get review images (max 3)
-                review_gallery = []
-                review_images = review.images.all()[:3]
-                for img in review_images:
-                    try:
-                        if str(img.image).startswith(('http://', 'https://')):
-                            image_url = str(img.image)
-                        else:
-                            image_url = generate_presigned_url(f"media/{img.image}", expires_in=3600)
-                        
-                        review_gallery.append({
-                            "id": img.id,
-                            "image_url": image_url,
-                            "uploaded_at": img.uploaded_at.isoformat() if img.uploaded_at else None
-                        })
-                    except (ValueError, FileNotFoundError):
-                        continue
-                
-                reviews_data.append({
-                    "id": review.id,
-                    "review_rating": review.review_rating,
-                    "time_ago": time_ago,
-                    "review_feedback": review.review_feedback,
-                    "review_by": review.review_by.full_name or review.review_by.email,
-                    "review_by_image": reviewer_image_url,
-                    "review_gallery": review_gallery,
-                    "user_id": review.review_by.id,
-                    "created_at": review.created_at.isoformat(),
+                        for img in ReviewImage.objects.filter(review=review)[:3]:
+                            img_url = _public_or_presigned(img.image)
+                            if img_url:
+                                review_gallery.append({
+                                    "id": img.id,
+                                    "image_url": img_url,
+                                    "uploaded_at": img.uploaded_at.isoformat() if img.uploaded_at else None,
+                                })
+                    except Exception as e:
+                        print(f"Error fetching review images: {str(e)}")
+
+                    reviews_data.append({
+                        "id": review.id,
+                        "review_rating": review.review_rating,
+                        "time_ago": review.time_ago(),
+                        "review_feedback": review.review_feedback,
+                        "review_by": review.review_by.full_name or review.review_by.email,
+                        "review_by_image": reviewer_image,
+                        "review_gallery": review_gallery,
+                        "user_id": review.review_by.id,
+                        "created_at": review.created_at.isoformat(),
+                        "is_current_user_review": review.review_by.id == request.user.id,
+                    })
+
+                # Add ratings + review data
+                company_data.update({
+                    "total_reviews": total_reviews,
+                    "average_rating": f"{avg_rating:.1f}" if avg_rating else "0.0",
+                    "latest_reviews": reviews_data,
                 })
-            
-            # Add reviews data to company_data
-            company_data.update({
-                "total_reviews": total_reviews,
-                "average_rating": round(avg_rating, 2) if avg_rating else 0,
-                "latest_reviews": reviews_data
-            })
-            
-            companies_list.append(company_data)
 
-        return Response({
-            "message": "Companies retrieved successfully",
-            "companies": companies_list,
-            "total": len(companies_list)
-        }, status=status.HTTP_200_OK)
+                companies_list.append(company_data)
 
+            return Response({
+                "message": "Companies retrieved successfully",
+                "companies": companies_list,
+                "total": len(companies_list),
+            }, status=status.HTTP_200_OK)
+
+        except Exception as e:
+            print(f"Error retrieving companies: {str(e)}")
+            return Response({"error": f"Error retrieving companies: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 class FavoriteCompanyView(APIView):
@@ -511,166 +515,191 @@ class AssignRepView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
-        data = request.data
-        referral_id = data.get("referral_id")
-        employee_id = data.get("employee_id")
-        note = data.get("notes", "")
-        referral_status = data.get("status", "in_progress")  # default to in_progress
-
-
-        
-
-        # Validate referral
         try:
-            referral_obj = Referral.objects.get(id=referral_id)
-        except Referral.DoesNotExist:
-            return Response({"error": "Referral not found"}, status=status.HTTP_404_NOT_FOUND)
+            data = request.data
+            print(f"AssignRepView received data: {data}")
+            referral_id = data.get("referral_id")
+            employee_id = data.get("employee_id")
+            note = data.get("notes", "")
+            referral_status = data.get("status", "in_progress")  # default to in_progress
 
-        # Validate employee
-        employee = None
-        if employee_id is not None:
+
+            
+
+            # Validate referral
             try:
-                employee = User.objects.get(id=employee_id)
-            except User.DoesNotExist:
-                return Response({"error": "Employee not found"}, status=status.HTTP_404_NOT_FOUND)
+                referral_obj = Referral.objects.get(id=referral_id)
+            except Referral.DoesNotExist:
+                return Response({"error": "Referral not found"}, status=status.HTTP_404_NOT_FOUND)
 
-        # Check if assignment already exists for this referral
-        assignment = ReferralAssignment.objects.filter(referral=referral_obj).last()
+            # Validate employee
+            employee = None
+            if employee_id is not None:
+                try:
+                    employee = User.objects.get(id=employee_id)
+                except User.DoesNotExist:
+                    return Response({"error": "Employee not found"}, status=status.HTTP_404_NOT_FOUND)
 
-        if assignment:
-            # Update existing assignment
-            assignment.assigned_to = employee
-            assignment.notes = note or assignment.notes
-            assignment.status = "in_progress"
-            assignment.save()
-            message = "Referral assignment updated successfully"
-        else:
-            # Create new assignment
-            assignment = ReferralAssignment.objects.create(
-                referral=referral_obj,
-                assigned_to=employee,
-                notes=note,
+            # Check if assignment already exists for this referral
+            assignment = ReferralAssignment.objects.filter(referral=referral_obj).last()
+
+            if assignment:
+                # Update existing assignment
+                assignment.assigned_to = employee
+                assignment.notes = note or assignment.notes
+                assignment.status = "in_progress"
+                assignment.save()
+                message = "Referral assignment updated successfully"
+            else:
+                # Create new assignment
+                assignment = ReferralAssignment.objects.create(
+                    referral=referral_obj,
+                    assigned_to=employee,
+                    notes=note,
+                )
+                message = "Referral assigned successfully"
+
+            # Update referral status
+            referral_obj.status = "cancelled" if referral_status == "reject" else "in_progress"
+            referral_obj.company_approval = True if referral_status == "accept" else False
+            referral_obj.save()
+
+            if referral_status == "accept":
+                log_activity(
+                    event="rep_assigned",
+                    actor=request.user,                 # whoever triggered the assign (company admin etc.)
+                    referral=referral_obj,
+                    subject_user=employee,              # the rep being assigned
+                    title="Rep assigned",
+                    body=f"{employee.full_name if employee else '—'} assigned to referral {referral_obj.reference_id}",
+                    meta={
+                        "assignment_id": assignment.id,
+                        "status": referral_obj.status,
+                        "company_approval": referral_obj.company_approval,
+                        "note": note,
+                    },
+                )
+            else:
+                log_activity(
+                    event="referral_rejected",
+                    actor=request.user,
+                    referral=referral_obj,
+                    title="Referral rejected",
+                    body=f"Referral {referral_obj.reference_id} was rejected",
+                    meta={
+                        "assignment_id": assignment.id,
+                        "status": referral_obj.status,
+                        "company_approval": referral_obj.company_approval,
+                        "note": note,
+                    },
+                )
+
+
+            if employee:
+                notification_data = {}
+
+                notification_body = f"you have been assigned to referral #{referral_obj.reference_id}"
+                send_push_notification_to_user(
+                    user=employee,
+                    title=f"New Referral Assigned #{referral_obj.reference_id}",
+                    body=notification_body,
+                    data=notification_data
+                )
+
+            try:
+                company = BusinessInfo.objects.get(user_id=referral_obj.company.id)
+            except Exception as e:
+                return Response({"error": "Company not found"}, status=status.HTTP_404_NOT_FOUND)
+
+
+            if referral_status == "accept":
+                # Payload for referred_by - company accepted referral
+                payload_referred_by = {
+                    "event": "referral.company_accepted",
+                    "unread": True,
+                    "referral_id": referral_obj.id,
+                    "reference_id": referral_obj.reference_id,
+                    "title": "Company accepted your referral",
+                    "message": f"{company.company_name} has accepted the referral",
+                    "actors": {
+                        "referred_by_id": referral_obj.referred_by.id,
+                        "referred_to_id": referral_obj.referred_to.id,
+                        "company_id": referral_obj.company.id,
+                        "rep_id": employee.id if employee else None
+                    },
+                    "meta": {
+                        "company_name": referral_obj.company.full_name,
+                        "referred_by_name": referral_obj.referred_by.full_name,
+                        "referred_to_name": referral_obj.referred_to.full_name,
+                        "status": referral_obj.status,
+                    }
+                }
+
+                # Payload for referred_to - company accepted referral
+                payload_referred_to = {
+                    "event": "referral.company_accepted",
+                    "unread": True,
+                    "referral_id": referral_obj.id,
+                    "reference_id": referral_obj.reference_id,
+                    "title": "Company accepted referral",
+                    "message": f"{company.company_name} has accepted the referral",
+                    "actors": {
+                        "referred_by_id": referral_obj.referred_by.id,
+                        "referred_to_id": referral_obj.referred_to.id,
+                        "company_id": referral_obj.company.id,
+                        "rep_id": employee.id if employee else None
+                    },
+                    "meta": {
+                        "company_name": referral_obj.company.full_name,
+                        "referred_by_name": referral_obj.referred_by.full_name,
+                        "referred_to_name": referral_obj.referred_to.full_name,
+                        "status": referral_obj.status,
+                    }
+                }
+
+                # Send notifications separately
+                notify_users([referral_obj.referred_by.id], payload_referred_by)
+                notify_users([referral_obj.referred_to.id], payload_referred_to)
+
+            # Payload for employee - assigned to referral
+            payload_employee = {
+                "event": "referral.rep_assigned",
+                "unread": True,
+                "referral_id": referral_obj.id,
+                "reference_id": referral_obj.reference_id,
+                "title": "You were assigned a referral",
+                "message": f"You have been assigned to referral #{referral_obj.reference_id}",
+                "actors": {
+                    "referred_by_id": referral_obj.referred_by.id,
+                    "referred_to_id": referral_obj.referred_to.id,
+                    "company_id": referral_obj.company.id,
+                    "rep_id": employee.id if employee else None
+                },
+                "meta": {
+                    "company_name": referral_obj.company.full_name,
+                    "referred_to_name": referral_obj.referred_to.full_name,
+                    "status": referral_obj.status,
+                }
+            }
+
+            if employee:
+                notify_users([employee.id], payload_employee)
+
+            return Response(
+                {
+                    "message": message,
+                    "assignment_id": assignment.id,
+                    "referral_status": referral_obj.status,
+                    "assigned_to": assignment.assigned_to.full_name if assignment.assigned_to else None,
+                },
+                status=status.HTTP_200_OK if message.endswith("updated successfully") else status.HTTP_201_CREATED,
             )
-            message = "Referral assigned successfully"
-
-        # Update referral status
-        referral_obj.status = "cancelled" if referral_status == "reject" else "in_progress"
-        referral_obj.company_approval = True if referral_status == "accept" else False
-        referral_obj.save()
-
-        log_activity(
-            event="rep_assigned",
-            actor=request.user,                 # whoever triggered the assign (company admin etc.)
-            referral=referral_obj,
-            subject_user=employee,              # the rep being assigned
-            title="Rep assigned",
-            body=f"{employee.full_name if employee else '—'} assigned to referral {referral_obj.reference_id}",
-            meta={
-                "assignment_id": assignment.id,
-                "status": referral_obj.status,
-                "company_approval": referral_obj.company_approval,
-                "note": note,
-            },
-        )
-
-        notification_data = {}
-
-        notification_body = f"you have been assigned to referral #{referral_obj.reference_id}"
-        send_push_notification_to_user(
-            user=employee,
-            title=f"New Referral Assigned #{referral_obj.reference_id}",
-            body=notification_body,
-            data=notification_data
-        )
-
-        try:
-            company = BusinessInfo.objects.get(user_id=referral_obj.company.id)
         except Exception as e:
-            return Response({"error": "Company not found"}, status=status.HTTP_404_NOT_FOUND)
-
-
-        if referral_status == "accept":
-            # Payload for referred_by - company accepted referral
-            payload_referred_by = {
-                "event": "referral.company_accepted",
-                "unread": True,
-                "referral_id": referral_obj.id,
-                "reference_id": referral_obj.reference_id,
-                "title": "Company accepted your referral",
-                "message": f"{company.company_name} has accepted the referral",
-                "actors": {
-                    "referred_by_id": referral_obj.referred_by.id,
-                    "referred_to_id": referral_obj.referred_to.id,
-                    "company_id": referral_obj.company.id,
-                    "rep_id": employee.id if employee else None
-                },
-                "meta": {
-                    "company_name": referral_obj.company.full_name,
-                    "referred_by_name": referral_obj.referred_by.full_name,
-                    "referred_to_name": referral_obj.referred_to.full_name,
-                    "status": referral_obj.status,
-                }
-            }
-
-            # Payload for referred_to - company accepted referral
-            payload_referred_to = {
-                "event": "referral.company_accepted",
-                "unread": True,
-                "referral_id": referral_obj.id,
-                "reference_id": referral_obj.reference_id,
-                "title": "Company accepted referral",
-                "message": f"{company.company_name} has accepted the referral",
-                "actors": {
-                    "referred_by_id": referral_obj.referred_by.id,
-                    "referred_to_id": referral_obj.referred_to.id,
-                    "company_id": referral_obj.company.id,
-                    "rep_id": employee.id if employee else None
-                },
-                "meta": {
-                    "company_name": referral_obj.company.full_name,
-                    "referred_by_name": referral_obj.referred_by.full_name,
-                    "referred_to_name": referral_obj.referred_to.full_name,
-                    "status": referral_obj.status,
-                }
-            }
-
-            # Send notifications separately
-            notify_users([referral_obj.referred_by.id], payload_referred_by)
-            notify_users([referral_obj.referred_to.id], payload_referred_to)
-
-        # Payload for employee - assigned to referral
-        payload_employee = {
-            "event": "referral.rep_assigned",
-            "unread": True,
-            "referral_id": referral_obj.id,
-            "reference_id": referral_obj.reference_id,
-            "title": "You were assigned a referral",
-            "message": f"You have been assigned to referral #{referral_obj.reference_id}",
-            "actors": {
-                "referred_by_id": referral_obj.referred_by.id,
-                "referred_to_id": referral_obj.referred_to.id,
-                "company_id": referral_obj.company.id,
-                "rep_id": employee.id if employee else None
-            },
-            "meta": {
-                "company_name": referral_obj.company.full_name,
-                "referred_to_name": referral_obj.referred_to.full_name,
-                "status": referral_obj.status,
-            }
-        }
-
-        if employee:
-            notify_users([employee.id], payload_employee)
-
-        return Response(
-            {
-                "message": message,
-                "assignment_id": assignment.id,
-                "referral_status": referral_obj.status,
-                "assigned_to": assignment.assigned_to.full_name if assignment.assigned_to else None,
-            },
-            status=status.HTTP_200_OK if message.endswith("updated successfully") else status.HTTP_201_CREATED,
-        )
+            print(f"Error assigning rep: {str(e)}")
+            return Response(
+                {"error": f"Error assigning rep: {str(e)}"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
 
 
 
@@ -1312,6 +1341,120 @@ class CompleteReferralView(APIView):
             )
 
 
+class CancelReferralView(APIView):
+    """
+    Allows the referred_by user to cancel a referral
+    before the referred_to (friend) opts in.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        try:
+            referral_id = request.data.get("referral_id")
+            if not referral_id:
+                return Response({"error": "referral_id is required"}, status=status.HTTP_400_BAD_REQUEST)
+
+            # Fetch referral
+            try:
+                referral = Referral.objects.get(id=referral_id)
+            except Referral.DoesNotExist:
+                return Response({"error": "Referral not found"}, status=status.HTTP_404_NOT_FOUND)
+
+            # Check that the logged-in user is the one who created the referral
+            if referral.referred_by != request.user:
+                return Response({"error": "You can only cancel referrals you created"}, status=status.HTTP_403_FORBIDDEN)
+
+            # Check that referred_to has not opted in yet
+            if referral.status != "pending":  # assuming "pending" means not yet accepted
+                return Response(
+                    {"error": "You can only cancel a referral that has not been opted in"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            # Update referral and assignment status
+            referral.status = "cancelled"
+            referral.save()
+
+            assignment = referral.assignments.last()
+            if assignment:
+                assignment.status = "cancelled"
+                assignment.save()
+
+            # Log cancellation event
+            log_activity(
+                event="cancelled",
+                actor=request.user,
+                referral=referral,
+                title="Referral cancelled",
+                body=f"{request.user.full_name} cancelled referral #{referral.reference_id}",
+                meta={
+                    "status": "cancelled",
+                    "referral_id": referral.id,
+                },
+            )
+
+            # # Prepare payloads for notifications
+            # payload_company = {
+            #     "event": "referral.cancelled",
+            #     "unread": True,
+            #     "referral_id": referral.id,
+            #     "reference_id": referral.reference_id,
+            #     "title": "Referral Cancelled",
+            #     "message": f"{request.user.full_name} cancelled the referral #{referral.reference_id}",
+            #     "actors": {
+            #         "referred_by_id": referral.referred_by.id,
+            #         "referred_to_id": referral.referred_to.id,
+            #         "company_id": referral.company.id,
+            #     },
+            #     "meta": {
+            #         "company_name": referral.company.full_name,
+            #         "referred_by_name": referral.referred_by.full_name,
+            #         "referred_to_name": referral.referred_to.full_name,
+            #         "status": "cancelled",
+            #     },
+            # }
+
+            # payload_referred_to = {
+            #     "event": "referral.cancelled",
+            #     "unread": True,
+            #     "referral_id": referral.id,
+            #     "reference_id": referral.reference_id,
+            #     "title": "Referral Cancelled",
+            #     "message": f"{referral.referred_by.full_name} has cancelled referral #{referral.reference_id}",
+            #     "actors": {
+            #         "referred_by_id": referral.referred_by.id,
+            #         "referred_to_id": referral.referred_to.id,
+            #         "company_id": referral.company.id,
+            #     },
+            #     "meta": {
+            #         "company_name": referral.company.full_name,
+            #         "referred_by_name": referral.referred_by.full_name,
+            #         "referred_to_name": referral.referred_to.full_name,
+            #         "status": "cancelled",
+            #     },
+            # }
+
+            # # Notify company and referred_to
+            # notify_users([referral.company.id], payload_company)
+            # notify_users([referral.referred_to.id], payload_referred_to)
+
+            # # Optional push notification to company
+            # notification_body = f"Referral Cancelled #{referral.reference_id}"
+            # send_push_notification_to_user(
+            #     user=referral.company,
+            #     title="Referral Cancelled",
+            #     body=notification_body,
+            #     data={"referral_id": referral.id},
+            # )
+
+            return Response({"message": "Referral cancelled successfully"}, status=status.HTTP_200_OK)
+
+        except Exception as e:
+            print(f"Error cancelling referral: {str(e)}")
+            return Response(
+                {"error": f"Failed to cancel referral: {str(e)}"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
 
 
 class SendAppInvitationView(APIView):
@@ -1380,7 +1523,87 @@ class SendAppInvitationView(APIView):
         
 
 
+class RewardsView(APIView):
+    permission_classes = [IsAuthenticated]
 
+    def get(self, request):
+        try:
+            # Get all referral rewards for the current user
+            rewards = ReferralReward.objects.filter(user=request.user).select_related('referral').order_by('-awarded_at')
+            reward_list = []
+            
+            # Separate totals for different statuses
+            total_points_earned = 0  # Only completed rewards
+            total_points_pending = 0  # Pending rewards
+            total_amount_earned = 0.00
+            total_amount_pending = 0.00
+            
+            for reward in rewards:
+                # Convert points to cash value (example: 1 point = $0.10)
+                cash_value = float(reward.points_awarded) * 0.10
+                
+                # Only count completed rewards in earned totals
+                if reward.status == "completed":
+                    total_points_earned += reward.points_awarded
+                    total_amount_earned += cash_value
+                elif reward.status == "pending":
+                    total_points_pending += reward.points_awarded
+                    total_amount_pending += cash_value
+                
+                # Get company name safely
+                try:
+                    if hasattr(reward.referral.company, 'business_info'):
+                        company_name = reward.referral.company.business_info.company_name
+                    else:
+                        company_name = reward.referral.company.full_name or reward.referral.company.email
+                except AttributeError:
+                    company_name = "Unknown Company"
+                
+                reward_list.append({
+                    "id": reward.id,
+                    "points": reward.points_awarded,
+                    "amount": round(cash_value, 2),
+                    "reference_id": reward.referral.reference_id,
+                    "status": reward.status,
+                    "referral_status": reward.referral.status,
+                    "company_name": company_name,
+                    "industry": reward.referral.company.business_info.industry if hasattr(reward.referral.company, 'business_info') else "",
+                    "referred_to_name": reward.referral.referred_to.full_name or reward.referral.referred_to.email,
+                    "date": reward.awarded_at.strftime("%d %b %Y") if reward.awarded_at else None,
+                    "withdrawal_status": reward.withdrawal_status,
+                    "is_withdrawable": reward.status == "completed" and not reward.withdrawal_status,
+                })
+            
+            # Separate rewards by status for frontend
+            pending_rewards = [r for r in reward_list if r["status"] == "pending"]
+            completed_rewards = [r for r in reward_list if r["status"] == "completed"]
+            
+            return Response(
+                {
+                    "message": "Rewards retrieved successfully",
+                    "summary": {
+                        "total_points_earned": total_points_earned,
+                        "total_points_pending": total_points_pending,
+                        "total_amount_earned": round(total_amount_earned, 2),
+                        "total_amount_pending": round(total_amount_pending, 2),
+                        "total_rewards": len(reward_list),
+                        "completed_count": len(completed_rewards),
+                        "pending_count": len(pending_rewards)
+                    },
+                    "rewards": {
+                        "all": reward_list,
+                        "completed": completed_rewards,
+                        "pending": pending_rewards
+                    }
+                },
+                status=status.HTTP_200_OK,
+            )
+        except Exception as e:
+            print(f"Error retrieving rewards: {str(e)}")
+            return Response(
+                {"error": f"Failed to retrieve rewards: {str(e)}"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
 
 
 
