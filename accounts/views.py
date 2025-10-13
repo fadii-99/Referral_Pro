@@ -380,78 +380,91 @@ class SignupView(APIView):
 
 
         else:
-            phone = request.data.get("phone")
-            user = None
+            try:
+                phone = request.data.get("phone")
+                user = None
 
-            if request.data.get("referral_code"):
+                if request.data.get("referral_code"):
 
-                if not User.objects.filter(referral_code__iexact=request.data.get("referral_code")).exists():
-                    return Response({"message": "Invalid referral code"}, status=status.HTTP_400_BAD_REQUEST)
-
-
-            existing_user = User.objects.get(email=request.data.get("email"))
-
-            if existing_user.is_to_be_registered:
+                    if not User.objects.filter(referral_code__iexact=request.data.get("referral_code")).exists():
+                        return Response({"message": "Invalid referral code"}, status=status.HTTP_400_BAD_REQUEST)
+                existing_user = None
                 try:
-                    existing_user.full_name = request.data.get("name")
+                    existing_user = User.objects.get(email=request.data.get("email"))
+                except User.DoesNotExist:
+                    print("No existing user with this email")
 
 
-                    existing_user.set_password(request.data.get("password"))
-                    existing_user.is_to_be_registered = False
-                    existing_user.phone = phone
-                    existing_user.save()
+                if existing_user:
+                    if existing_user.is_to_be_registered:
+                        try:
+                            existing_user.full_name = request.data.get("name")
 
-                    tokens = get_tokens_for_user(existing_user)
+
+                            existing_user.set_password(request.data.get("password"))
+                            existing_user.is_to_be_registered = False
+                            existing_user.phone = phone
+                            existing_user.save()
+
+                            tokens = get_tokens_for_user(existing_user)
+
+
+                            if request.data.get("referral_code"):
+                                RU = ReferralUsage.objects.create(
+                                    referral_code=request.data.get("referral_code"),
+                                    used_by=existing_user
+                                )
+                                
+
+                            return Response({
+                                "message": "Solo user registered successfully",
+                                "user": {"email": existing_user.email, "name": existing_user.full_name, "role": existing_user.role},
+                                "tokens": tokens
+                            }, status=200)
+                        except Exception as e:
+                            print("Error registering to-be-registered user:", str(e))
+                            return Response({"error": "Failed to complete registration. Please try again."}, status=500)
+                else:
+                    print("Creating new solo user")
+                    if User.objects.filter(email=request.data.get("email")).exists():
+                        return Response({"error": "Email already registered"}, status=400)
+
+
+                    if request.data.get("phone"):
+                        if User.objects.filter(phone=request.data.get("phone")).exists():
+                            return Response({"error": "Phone number already registered"}, status=400)
+                    
+
+                    user = User.objects.create_user(
+                        email=request.data.get("email"), password=request.data.get("password"), full_name=request.data.get("name"), 
+                        role="solo",
+                        phone=request.data.get("phone"),
+                    )
+
+                    tokens = get_tokens_for_user(user)
 
 
                     if request.data.get("referral_code"):
                         RU = ReferralUsage.objects.create(
                             referral_code=request.data.get("referral_code"),
-                            used_by=existing_user
+                            used_by=user
                         )
+
+                    send_solo_signup_success_email(user.email, user.full_name)
                         
 
                     return Response({
                         "message": "Solo user registered successfully",
-                        "user": {"email": existing_user.email, "name": existing_user.full_name, "role": existing_user.role},
+                        "user": {"email": user.email, "name": user.full_name, "role": user.role},
                         "tokens": tokens
                     }, status=200)
-                except Exception as e:
-                    print("Error registering to-be-registered user:", str(e))
-                    return Response({"error": "Failed to complete registration. Please try again."}, status=500)
-            else:
-                if User.objects.filter(email=request.data.get("email")).exists():
-                    return Response({"error": "Email already registered"}, status=400)
+            except Exception as e:
+                print("Error during solo signup:", str(e))
 
+                if str(e) == 'list index out of range':
+                    return Response({"error": "Invalid payload format"}, status=400)
 
-                if request.data.get("phone"):
-                    if User.objects.filter(phone=request.data.get("phone")).exists():
-                        return Response({"error": "Phone number already registered"}, status=400)
-                
-
-                # user = User.objects.create_user(
-                #     email=request.data.get("email"), password=request.data.get("password"), full_name=request.data.get("name"), 
-                #     role="solo",
-                #     phone=request.data.get("phone"),
-                # )
-                user = None
-
-                tokens = get_tokens_for_user(user)
-
-
-                if request.data.get("referral_code"):
-                    RU = ReferralUsage.objects.create(
-                        referral_code=request.data.get("referral_code"),
-                        used_by=user
-                    )
-                    
-
-                return Response({
-                    "message": "Solo user registered successfully",
-                    "user": {"email": user.email, "name": user.full_name, "role": user.role},
-                    "tokens": tokens
-                }, status=200)
-
+                return Response({"error": "Failed to register user. Please try again."}, status=500)
 class EmailPasswordLoginView(APIView):
     permission_classes = [AllowAny]
     authentication_classes = []
@@ -1244,21 +1257,43 @@ class ResetPasswordView(APIView):
 
 
 
+from firebase_admin import messaging
+
 class RegisterFCMTokenView(APIView):
     permission_classes = [IsAuthenticated]
     
     def post(self, request):
-        token = request.data.get("token")
-        platform = request.data.get("platform", "Android")
+        try:
+            token = request.data.get("token")
+            platform = request.data.get("platform", "Android")
 
-        if not token:
-            return Response({"error": "Token is required"}, status=400)
+            if not token:
+                return Response({"error": "Token is required"}, status=400)
 
-        Device.objects.update_or_create(
-            user=request.user, token=token,
-            defaults={"platform": platform}
-        )
-        return Response({"message": "Token registered successfully"})
+            # Optional: Validate token with Firebase
+            try:
+                # This will throw an exception if token is invalid
+                messaging.Message(token=token)
+            except Exception:
+                return Response({"error": "Invalid FCM token"}, status=400)
+
+            # Remove any existing instances of this token
+            Device.objects.filter(token=token).delete()
+            
+            # Create new device record for current user
+            Device.objects.create(
+                user=request.user,
+                token=token,
+                platform=platform
+            )
+            
+            return Response({"message": "Token registered successfully"})
+            
+        except Exception as e:
+            print("Error registering FCM token:", str(e))
+            return Response({"error": "Failed to register token"}, status=500)
+
+
 
 
 class UnregisterFCMTokenView(APIView):

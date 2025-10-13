@@ -60,76 +60,82 @@ class DashboardStatsView(APIView):
         try:
             user = request.user
 
-            # Referrals created by this user
-            referrals_created = Referral.objects.filter(company=user).count()
+            if user.role != "company":
+                # Referrals created by this user
+                referrals_created = Referral.objects.filter(company=user).count()
 
-            # Referrals accepted by companies
-            referrals_accepted = Referral.objects.filter(
-                company=user, status="in_progress"
-            ).count()
+                # Referrals accepted by companies
+                referrals_accepted = Referral.objects.filter(
+                    company=user, status="in_progress"
+                ).count()
 
-            # ✅ Referrals completed (count)
-            referrals_completed_count = Referral.objects.filter(
-                company=user, status="completed"
-            ).count()
+                # ✅ Referrals completed (count)
+                referrals_completed_count = Referral.objects.filter(
+                    company=user, status="completed"
+                ).count()
 
-            # ✅ Completed referral IDs for reward sum
-            completed_referrals = Referral.objects.filter(
-                company=user, status="completed"
-            ).values_list("id", flat=True)
+                # ✅ Completed referral IDs for reward sum
+                completed_referrals = Referral.objects.filter(
+                    company=user, status="completed"
+                ).values_list("id", flat=True)
 
-            # ✅ Total points earned (from ReferralReward)
-            total_awards = ReferralReward.objects.filter(
-                referral_id__in=completed_referrals
-            ).aggregate(
-                total_points=Sum("points_awarded")
-            )["total_points"] or 0
+                # ✅ Total points earned (from ReferralReward)
+                total_awards = ReferralReward.objects.filter(
+                    referral_id__in=completed_referrals
+                ).aggregate(
+                    total_points=Sum("points_awarded")
+                )["total_points"] or 0
 
-            # Conversion rate for cash value (example: 1 point = $1)
-            points_cashed_value = float(total_awards) / 10.0
+                # Conversion rate for cash value (example: 1 point = $1)
+                points_cashed_value = float(total_awards) / 10.0
 
-            # Missed opportunities (cancelled or rejected)
-            missed_opportunity = Referral.objects.filter(
-                company=user, status="cancelled"
-            ).count()
+                # Missed opportunities (cancelled or rejected)
+                missed_opportunity = Referral.objects.filter(
+                    company=user, status="cancelled"
+                ).count()
 
-            # ----------------------
-            # Graph data (last 7 days)
-            # ----------------------
-            today = now().date()
-            start_date = today - timedelta(days=6)
+                # ----------------------
+                # Graph data (last 7 days)
+                # ----------------------
+                today = now().date()
+                start_date = today - timedelta(days=6)
 
-            referrals_per_day = (
-                Referral.objects.filter(company=user, created_at__date__gte=start_date)
-                .extra(select={"day": "date(created_at)"})
-                .values("day")
-                .annotate(count=Count("id"))
-                .order_by("day")
-            )
+                referrals_per_day = (
+                    Referral.objects.filter(company=user, created_at__date__gte=start_date)
+                    .extra(select={"day": "date(created_at)"})
+                    .values("day")
+                    .annotate(count=Count("id"))
+                    .order_by("day")
+                )
 
-            daily_counts = {str(item["day"]): item["count"] for item in referrals_per_day}
+                daily_counts = {str(item["day"]): item["count"] for item in referrals_per_day}
 
-            graph_data = []
-            for i in range(7):
-                day = start_date + timedelta(days=i)
-                graph_data.append({
-                    "date": day.strftime("%Y-%m-%d"),
-                    "day": day.strftime("%a"),
-                    "count": daily_counts.get(str(day), 0)
-                })
+                graph_data = []
+                for i in range(7):
+                    day = start_date + timedelta(days=i)
+                    graph_data.append({
+                        "date": day.strftime("%Y-%m-%d"),
+                        "day": day.strftime("%a"),
+                        "count": daily_counts.get(str(day), 0)
+                    })
 
-            return Response(
-                {
-                    "referrals_created": referrals_created,
-                    "referrals_accepted": referrals_accepted,
-                    "referrals_completed": referrals_completed_count,
-                    "total_points_allocated": total_awards,
-                    "points_cashed_value": points_cashed_value,
-                    "missed_opportunity": missed_opportunity,
-                    "graph_data": graph_data,
-                },
-                status=status.HTTP_200_OK,
-            )
+                return Response(
+                    {
+                        "referrals_created": referrals_created,
+                        "referrals_accepted": referrals_accepted,
+                        "referrals_completed": referrals_completed_count,
+                        "total_points_allocated": total_awards,
+                        "points_cashed_value": points_cashed_value,
+                        "missed_opportunity": missed_opportunity,
+                        "graph_data": graph_data,
+                    },
+                    status=status.HTTP_200_OK,
+                )
+            elif user.role == "employee":
+                return Response(
+                    {"error": "Dashboard stats not available for employee users."},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
         except Exception as e:
             print(f"Error fetching dashboard stats: {str(e)}")
             return Response(

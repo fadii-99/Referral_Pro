@@ -1,10 +1,14 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <meta charset="UTF-8">
+  <meta    <!-- Footer -->
+    <div style="margin-top:30px; font-size:12px; color:#02025C; text-align:center; line-height:1.6;">
+      <p style="margin:0;">If you didn't request this code, you can safely ignore this email.</p>
+      <p style="margin:6px 0 0;">&copy; 2025 <strong style="color:#02025C;">ReferralPro</strong>. All rights reserved.</p>
+    </div>set="UTF-8">
   <title>Your OTP Code</title>
 </head>
-<body style="margin:0; padding:0; background-color:#f7f8fa; font-family:Arial, sans-serif;">
+<body style="margin:0; padding:0; background-color:#F1EFF9; font-family:Arial, sans-serif;">
   <div style="max-width:600px; margin:30px auto; background:#ffffff; border-radius:8px; padding:30px; border:1px solid #e5e7eb;">
     
     <!-- Header -->
@@ -13,19 +17,19 @@
     </h2>
 
     <!-- Intro -->
-    <p style="color:#333333; line-height:1.6; margin:0 0 15px 0; text-align:center;">
+    <p style="color:#02025C; line-height:1.6; margin:0 0 15px 0; text-align:center;">
       Hello,<br>
       You requested a one-time password (OTP) for 
-      <strong style="color:#02025c;">{{ purpose }}</strong>.
+      <strong style="color:#02025C;">{{ purpose }}</strong>.
     </p>
 
     <!-- OTP Code -->
-    <div style="background:#02025c; color:#ffffff; font-size:28px; font-weight:bold; letter-spacing:8px; text-align:center; padding:20px; border-radius:6px; margin:25px 0;">
+    <div style="background:#24D4FE; color:#02025C; font-size:28px; font-weight:bold; letter-spacing:8px; text-align:center; padding:20px; border-radius:6px; margin:25px 0;">
       {{ otp }}
     </div>
 
     <!-- Expiry -->
-    <p style="color:#333333; font-size:15px; line-height:1.5; margin:0 0 15px 0; text-align:center;">
+    <p style="color:#02025C; font-size:15px; line-height:1.5; margin:0 0 15px 0; text-align:center;">
       This code expires in 
       <span style="color:#e74c3c; font-weight:bold;">{{ expires_in }} minutes</span>.
     </p>

@@ -1429,3 +1429,6 @@ class NotificationStatsView(APIView):
                 'stats_by_type': list(stats_by_type)
             }
         }, status=status.HTTP_200_OK)
+
+
+
