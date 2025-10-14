@@ -59,8 +59,10 @@ class DashboardStatsView(APIView):
     def get(self, request):
         try:
             user = request.user
+            print(f"Fetching dashboard stats for user ID {user.id} with role {user.role}")
 
-            if user.role != "company":
+            if user.role == "company":
+                print("User is not a company, returning empty stats.")
                 # Referrals created by this user
                 referrals_created = Referral.objects.filter(company=user).count()
 

@@ -465,6 +465,8 @@ class SignupView(APIView):
                     return Response({"error": "Invalid payload format"}, status=400)
 
                 return Response({"error": "Failed to register user. Please try again."}, status=500)
+
+
 class EmailPasswordLoginView(APIView):
     permission_classes = [AllowAny]
     authentication_classes = []
@@ -648,6 +650,77 @@ class SocialLoginView(APIView):
                 "user": {"email": user.email, "name": user.full_name, "role": user.role}, 
                 "tokens": tokens
             })
+
+    def _verify_google_token(self, token):
+        info = id_token.verify_oauth2_token(token, google_requests.Request())
+
+        print("\nGoogle token info:", info)
+        
+        # Get user email from token info
+        email = info.get("email")
+        if not email:
+            raise Exception("Email not found in Google token")
+
+        return {
+            "email": email,
+            "name": info.get("name", ""),
+            "picture": info.get("picture"),
+            "platform": "google"
+        }
+
+    def _verify_facebook_token(self, token):
+        fb_url = f"https://graph.facebook.com/me?fields=id,name,email,picture&access_token={token}"
+        resp = requests.get(fb_url)
+        if resp.status_code != 200:
+            raise Exception("Invalid token")
+        data = resp.json()
+        return {
+            "email": data.get("email"),
+            "name": data.get("name"),
+            "picture": data.get("picture", {}).get("data", {}).get("url"),
+            "platform": "facebook"
+        }
+
+    def _verify_apple_token(self, token: str):
+        # 1. Decode header to find kid
+        header = jwt.get_unverified_header(token)
+        kid = header["kid"]
+
+        # 2. Fetch Apple public keys
+        apple_keys = requests.get("https://appleid.apple.com/auth/keys").json()["keys"]
+
+        # 3. Match correct key
+        key = next((k for k in apple_keys if k["kid"] == kid), None)
+        if not key:
+            raise ValueError("Public key not found for given kid")
+
+        # 4. Build public key
+        public_key = RSAAlgorithm.from_jwk(key)
+
+        # 5. Decode and verify JWT
+        info = jwt.decode(
+            token,
+            key=public_key,
+            algorithms=["RS256"],
+            audience=settings.APPLE_BUNDLE_ID,
+            issuer="https://appleid.apple.com"
+        )
+        print("\nApple token info:", info)
+        emaill = info.get("email")
+        print("\nApple email:", emaill)
+
+        is_relay = False
+
+        if emaill.endswith("@privaterelay.appleid.com"):
+            is_relay = True
+
+
+        return {
+            "email": info.get("email"),
+            "name": info.get("name", ""),
+            "sub": info.get("sub") ,"is_relay": is_relay,
+            "platform": "apple" 
+        }
 
 
 

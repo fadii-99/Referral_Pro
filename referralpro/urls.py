@@ -17,7 +17,7 @@ Including another URLconf
 from django.urls import path, include
 from django.conf import settings
 from django.conf.urls.static import static
-from activity.views import ActivityListView
+from activity.views import ActivityListView, ReferralActivityListView
 from chat import views as views1
 from accounts import views as views2
 
@@ -27,7 +27,8 @@ urlpatterns = [
     path('refer/', include('referr.urls')),
     path('chat/', include('chat.urls')),
     path('super/', include('super.urls')),
-    path("activity/", ActivityListView.as_view(), name="activity_list"),
+    path("activity/", ReferralActivityListView.as_view(), name="referral_activity_list"),
+    path("all_activity/", ActivityListView.as_view(), name="activity_list"),
 
     path('notifications/', views1.NotificationListView.as_view(), name='notification_list'),
     path('notifications/mark-read/', views1.MarkNotificationReadView.as_view(), name='mark_notification_read'),
