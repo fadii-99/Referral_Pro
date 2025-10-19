@@ -7,4 +7,3 @@ websocket_urlpatterns = [
     re_path(r'^api/ws/chat-list/?$', consumers.ChatListConsumer.as_asgi()),
 ]
 
-

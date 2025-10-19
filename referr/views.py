@@ -726,6 +726,7 @@ class ListSoloReferralView(APIView):
             referrals = Referral.objects.filter(referred_to=request.user.id).select_related(
                 'referred_to', 'company', 'company__business_info'
             )
+            
         referral_list = []
         for referral in referrals:  
             # Get company information
@@ -1470,11 +1471,15 @@ class SendAppInvitationView(APIView):
 
     def post(self, request):
         data = request.data
+        print(data)
 
         
         # Get data from request
         email = data.get("email")
-        phone = data.get("phone")
+
+        phone = '+'+data.get("country_code")+data.get("phone")
+
+        country_code = data.get("country_code")
         name = data.get("name")
         
         # Validate required fields
@@ -1508,7 +1513,8 @@ class SendAppInvitationView(APIView):
             )
 
             if phone:
-                sms_result = TwilioService.send_app_download_sms(
+                print(f"Sending app download SMS to {phone}")
+                TwilioService.send_app_download_sms(
                     phone_number=phone,
                     name=name,
                     sender_name=sender_name
@@ -1524,6 +1530,7 @@ class SendAppInvitationView(APIView):
 
             
         except Exception as e:
+            prinnt(f"Error sending invitation: {str(e)}")
             return Response(
                 {"error": f"Failed to send invitation: {str(e)}"},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -1618,3 +1625,117 @@ class RewardsView(APIView):
 
 
 
+
+
+
+
+
+# from itertools import chain
+
+# class ListSoloReferralView(APIView):
+#     permission_classes = [IsAuthenticated]
+
+#     def post(self, request):
+#         user = request.user
+
+#         # Fetch both directions with related objects for fewer queries
+#         qs_by = (
+#             Referral.objects
+#             .filter(referred_by=user)
+#             .select_related('referred_by', 'referred_to', 'company', 'company__business_info')
+#             .order_by('-created_at')
+#         )
+#         qs_to = (
+#             Referral.objects
+#             .filter(referred_to=user)
+#             .select_related('referred_by', 'referred_to', 'company', 'company__business_info')
+#             .order_by('-created_at')
+#         )
+
+#         def serialize(referral, referral_type: str):
+#             """
+#             referral_type: "by" for referrals created by current user,
+#                            "to" for referrals where current user is the recipient.
+#             """
+#             # --- Company info ---
+#             company_name = ""
+#             company_type = ""
+#             industry = ""
+#             company_image_url = None
+
+#             try:
+#                 # Preferred display name: BusinessInfo.company_name → fallback to company user's full_name
+#                 if hasattr(referral.company, "business_info") and referral.company.business_info:
+#                     biz = referral.company.business_info
+#                     company_name = biz.company_name or ""
+#                     company_type = getattr(biz, "biz_type", "") or ""
+#                     industry = getattr(biz, "industry", "") or ""
+#                 if not company_name:
+#                     company_name = referral.company.full_name or ""
+
+#                 # Company image (stored on user model per your code)
+#                 if getattr(referral.company, "image", None):
+#                     company_image_url = _public_or_presigned(referral.company.image)
+#             except Exception:
+#                 company_name = company_name or "Unknown Company"
+#                 company_type = company_type or "Unknown"
+
+#             # --- People images (safe/public or presigned) ---
+#             referred_to_image = IMAGEURL(referral.referred_to.image) if getattr(referral.referred_to, "image", None) else None
+#             referred_by_image = IMAGEURL(referral.referred_by.image) if getattr(referral.referred_by, "image", None) else None
+
+#             # --- Dates ---
+#             created_display = referral.created_at.strftime("%d %b %Y") if referral.created_at else None
+#             created_order = referral.updated_at.timestamp() if referral.updated_at else 0
+
+#             return {
+#                 "id": referral.id,
+#                 "reference_id": referral.reference_id,
+
+#                 "referred_to_email": referral.referred_to.email,
+#                 "referred_to_name": referral.referred_to.full_name,
+#                 "referred_to_image": referred_to_image,
+
+#                 "referred_by_email": referral.referred_by.email,
+#                 "referred_by_name": referral.referred_by.full_name,
+#                 "referred_by_image": referred_by_image,
+
+#                 "industry": industry,
+#                 "company_name": company_name,
+#                 "company_image": company_image_url,
+#                 "company_type": company_type,
+
+#                 "status": referral.status,
+#                 "date": created_display,
+
+#                 "reason": referral.service_type,
+#                 "urgency": referral.urgency,
+#                 "notes": referral.notes,
+#                 "privacy": referral.privacy_opted,
+#                 "referred_by_approval": referral.referred_by_approval,
+
+#                 # what you asked for:
+#                 "referral_type": "by" if referral_type == "by" else "to",
+
+#                 # internal field for sorting (dropped before response)
+#                 "_date_order": created_order,
+#             }
+
+#         # Build one combined list
+#         combined = []
+#         combined.extend(serialize(r, "by") for r in qs_by)
+#         combined.extend(serialize(r, "to") for r in qs_to)
+
+#         # Newest first
+#         combined.sort(key=lambda x: x["_date_order"], reverse=True)
+#         for item in combined:
+#             item.pop("_date_order", None)
+
+#         return Response(
+#             {
+#                 "message": "Referral list retrieved successfully",
+#                 "referrals": combined,   # single array with both "by" and "to"
+#                 "total": len(combined),
+#             },
+#             status=status.HTTP_200_OK,
+#         )

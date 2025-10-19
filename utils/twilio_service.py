@@ -24,6 +24,7 @@ class TwilioService:
 
     @classmethod
     def send_app_download_sms(cls, phone_number: str, name: str, sender_name: str = None):
+        print(f"Preparing to send app download SMS to {phone_number} for {name}")
         """
         Send SMS invitation to download the ReferralPro app
         """
@@ -48,6 +49,7 @@ class TwilioService:
             return {"success": True, "sid": message.sid}
 
         except Exception as e:
+            print(f"Failed to send app download SMS to {phone_number}: {str(e)}")
             return {"success": False, "error": str(e)}
 
 

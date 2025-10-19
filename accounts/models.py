@@ -344,8 +344,6 @@ class FavoriteCompany(models.Model):
 
 
 
-
-
 class ReferralUsage(models.Model):
     referral_code = models.CharField(max_length=20, null=True, blank=True)
     used_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name="used_referrals")
