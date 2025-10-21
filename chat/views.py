@@ -23,6 +23,7 @@ from django.core.serializers.json import DjangoJSONEncoder
 from utils.storage_backends import generate_presigned_url
 from utils.push import send_push_notification_to_user 
 
+
 def serialize_message_with_read_state(msg, viewer, participants):
     """
     Serialize message with dual read perspectives:
@@ -350,6 +351,8 @@ class CreateChatRoomView(APIView):
         try:
             referral_id = request.data.get('referral_id')
             solo_user_id = request.data.get('solo_user_id')
+
+            
             
             if not referral_id or not solo_user_id:
                 return Response({
@@ -360,6 +363,18 @@ class CreateChatRoomView(APIView):
             # Get referral and solo user
             referral = get_object_or_404(Referral, id=referral_id)
             solo_user = get_object_or_404(User, id=solo_user_id, role='solo')
+
+            if ChatRoom.objects.filter(referral_id=referral_id).exists():
+                chat_room = ChatRoom.objects.get(referral_id=referral_id)
+                try:
+                    serializer = ChatRoomSerializer(chat_room, context={'request': request})
+                except Exception as e:
+                    print(str(e))
+                return Response({
+                    'success': True,
+                    'message': 'Chat room already created',
+                    'chat_room': serializer.data
+                }, status=status.HTTP_200_OK)
 
             print("Authenticated user role:", request.user.role)
 
@@ -383,30 +398,37 @@ class CreateChatRoomView(APIView):
                 )
 
             # Case 2: Individual business (Company ↔ Solo)
-            elif getattr(request.user, 'business_info', None) and request.user.business_info.biz_type == 'individual':
+            elif getattr(request.user, 'business_info', None) and request.user.business_info.biz_type == 'sole':
+                print('[ponch gya]')
                 chat_room = ChatRoom.create_room_for_referral(
                     referral=referral,
                     solo_user=solo_user
                 )
+                print('agay chalo')
 
             # Case 3: Other companies must assign a rep
             else:
                 return Response({
                     'success': False,
-                    'error': 'Non-individual businesses must assign a rep first'
+                    'error': 'Non-Independent businesses must assign a rep first'
                 }, status=status.HTTP_400_BAD_REQUEST)
                     
             # Create participants
-            self._create_participant_records(chat_room)
-            
+            try:
+                self._create_participant_records(chat_room)
+            except Exception as e:
+                print(str(e))
             # Send chat list updates to all participants (non-blocking)
             try:
                 self._send_chat_list_updates_for_new_room(chat_room)
             except Exception as notification_error:
                 print(f"Chat list update error (non-critical): {notification_error}")
+
             
-            serializer = ChatRoomSerializer(chat_room, context={'request': request})
-            
+            try:
+                serializer = ChatRoomSerializer(chat_room, context={'request': request})
+            except Exception as e:
+                print(str(e))
             return Response({
                 'success': True,
                 'message': 'Chat room created successfully',

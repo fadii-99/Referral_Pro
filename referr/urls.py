@@ -1,7 +1,7 @@
 # referr/urls.py
 from django.urls import path
 
-from .views import ListCompaniesView, SendReferralView,ListSoloReferralView, ListReferralView,ListCompanyReferralView, SendAppInvitationView, ListAssignedReferralView,CompleteReferralView, AssignRepView, ListRepReferralView, SendAcceptView, UpdateReferralPrivacyView, FavoriteCompanyView, DashboardStatsView, CancelReferralView, RewardsView
+from .views import ListCompaniesView, SendReferralView,ListSoloReferralView, ListReferralView,ListCompanyReferralView, SendAppInvitationView, ListAssignedReferralView,CompleteReferralView, AssignRepView, ListRepReferralView, SendAcceptView, UpdateReferralPrivacyView, FavoriteCompanyView, DashboardStatsView, CancelReferralView, RewardsView, ReferralView
 
 urlpatterns = [
     path("dashboard/", DashboardStatsView.as_view(), name="dashboard"),
@@ -20,4 +20,6 @@ urlpatterns = [
     path("add_manually/", SendAppInvitationView.as_view(), name="add_manually"),
     path('favorite/', FavoriteCompanyView.as_view(), name='add_favorite'),
     path('rewards/', RewardsView.as_view(), name='rewards'),
+    path('get_referral_details/', ReferralView.as_view(), name='get_referral_details'),
+
 ]

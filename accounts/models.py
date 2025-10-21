@@ -130,6 +130,7 @@ class BusinessInfo(models.Model):
     post_code = models.CharField(max_length=20)
     website = models.CharField(max_length=255, blank=True, null=True)
     us_state = models.CharField(max_length=100)
+    avg_rating = models.CharField(max_length=10, blank=True, null=True)
 
     def __str__(self):
         return f"{self.company_name} ({self.user.email})"

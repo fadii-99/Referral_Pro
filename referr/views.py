@@ -9,7 +9,8 @@ from django.db import models
 from django.db.models import Count, Sum
 from django.utils.timezone import now, timedelta
 from django.db.models import Sum
-
+from django.db.models import Count, Sum, Avg, F, ExpressionWrapper, DurationField, Min
+from django.db.models.functions import Coalesce
 
 # models
 from accounts.models import BusinessInfo
@@ -62,8 +63,6 @@ class DashboardStatsView(APIView):
             print(f"Fetching dashboard stats for user ID {user.id} with role {user.role}")
 
             if user.role == "company":
-                print("User is not a company, returning empty stats.")
-                # Referrals created by this user
                 referrals_created = Referral.objects.filter(company=user).count()
 
                 # Referrals accepted by companies
@@ -121,23 +120,159 @@ class DashboardStatsView(APIView):
                         "count": daily_counts.get(str(day), 0)
                     })
 
+                resp_qs = (
+                    Referral.objects
+                    .filter(company=user, status__in=['in_progress', 'completed'])
+                    .annotate(first_assigned=Min("assignments__assigned_at"))
+                )
+
+
+
+                avg_delta = (
+                    resp_qs.exclude(first_assigned__isnull=True)
+                    .annotate(delta=ExpressionWrapper(F("first_assigned") - F("created_at"), output_field=DurationField()))
+                    .aggregate(avg_delta=Avg("delta"))["avg_delta"]
+                )
+
+                # Fallback: if none had assignments, approximate with updated_at (status change time)
+                if avg_delta is None:
+                    avg_delta = (
+                        Referral.objects
+                        .filter(company=user, status__in=['in_progress', 'completed'])
+                        .annotate(delta=ExpressionWrapper(F("updated_at") - F("created_at"), output_field=DurationField()))
+                        .aggregate(avg_delta=Avg("delta"))["avg_delta"]
+                    )
+
+                def _humanize(td):
+                    if not td:
+                        return None
+                    total_seconds = int(td.total_seconds())
+                    days, rem = divmod(total_seconds, 86400)
+                    hours, rem = divmod(rem, 3600)
+                    minutes, _ = divmod(rem, 60)
+                    
+                    if days:
+                        return f"{days}d"
+                    elif hours:
+                        return f"{hours}h"
+                    else:
+                        return f"{minutes}m"
+
+                avg_response_time_seconds = int(avg_delta.total_seconds()) if avg_delta else None
+                avg_response_time_human = _humanize(avg_delta)
+
                 return Response(
                     {
                         "referrals_created": referrals_created,
+                        "referrals_accepted_percentage": (referrals_accepted * 100) / referrals_created,
                         "referrals_accepted": referrals_accepted,
+                        "referrals_this_month": Referral.objects.filter(
+                            company=user,
+                            created_at__gte=today.replace(day=1)
+                        ).count(),
                         "referrals_completed": referrals_completed_count,
                         "total_points_allocated": total_awards,
                         "points_cashed_value": points_cashed_value,
                         "missed_opportunity": missed_opportunity,
                         "graph_data": graph_data,
+                        "avg_response_time": avg_response_time_human,
                     },
                     status=status.HTTP_200_OK,
                 )
-            elif user.role == "employee":
+            elif user.role == "solo":
+                # ✅ Available balance: completed & not withdrawn
+                # Using same conversion as RewardsView: 1 point = $0.10
+                completed_points = (
+                    ReferralReward.objects
+                    .filter(user=user, status="completed", withdrawal_status=False)
+                    .aggregate(total=Coalesce(Sum("points_awarded"), 0))
+                )["total"] or 0
+
+                available_balance = round(float(completed_points) * 0.10, 2)
+
                 return Response(
-                    {"error": "Dashboard stats not available for employee users."},
+                    {
+                        "available_balance": available_balance
+                    },
+                    status=status.HTTP_200_OK,
+                )
+
+            elif user.role == "employee":
+                # 🔗 All assignments for this employee
+                assignments_qs = ReferralAssignment.objects.filter(assigned_to=user)
+
+                # ✅ Active / Completed counts (based on linked referral status)
+                active_referrals = assignments_qs.filter(referral__status="in_progress").count()
+                completed_referrals = assignments_qs.filter(referral__status="completed").count()
+
+                # ⏱️ Average response time:
+                # from when the referral was assigned to when it was marked completed
+                completed_for_avg = assignments_qs.filter(referral__status="completed").select_related("referral")
+                avg_delta = (
+                    completed_for_avg
+                    .annotate(delta=ExpressionWrapper(F("referral__updated_at") - F("assigned_at"),
+                                                     output_field=DurationField()))
+                    .aggregate(avg_delta=Avg("delta"))["avg_delta"]
+                )
+
+                def _humanize(td):
+                    if not td:
+                        return None
+                    total_seconds = int(td.total_seconds())
+                    days, rem = divmod(total_seconds, 86400)
+                    hours, rem = divmod(rem, 3600)
+                    minutes, _ = divmod(rem, 60)
+                    
+                    if days:
+                        return f"{days}d"
+                    elif hours:
+                        return f"{hours}h"
+                    else:
+                        return f"{minutes}m"
+
+                avg_response_time_seconds = int(avg_delta.total_seconds()) if avg_delta else None
+                avg_response_time_human = _humanize(avg_delta)
+
+                # 📅 Upcoming appointments: pending or friend_opted_in
+                UPCOMING_STATUSES = ["pending", "friend_opted_in"]  # correct values from STATUS_CHOICES
+                upcoming_qs = (
+                    assignments_qs
+                    .filter(referral__status__in=UPCOMING_STATUSES)
+                    .select_related("referral", "referral__company", "referral__referred_to", "referral__company__business_info")
+                    .order_by("referral__created_at")
+                )
+
+                # build a small list (max 5) for UI
+                upcoming_list = []
+                for a in upcoming_qs[:5]:
+                    r = a.referral
+                    # prefer BusinessInfo.company_name if present
+                    company_name = getattr(getattr(r.company, "business_info", None), "company_name", None) or (r.company.full_name or r.company.email)
+                    upcoming_list.append({
+                        "reference_id": r.reference_id,
+                        "status": r.status,
+                        "created_at": r.created_at.isoformat() if r.created_at else None,
+                        "company_name": company_name,
+                        "referred_to_name": r.referred_to.full_name or r.referred_to.email,
+                    })
+
+                return Response(
+                    {
+                        "active_referrals": active_referrals,
+                        "completed_referrals": completed_referrals,
+                        "average_response_time": avg_response_time_human,
+                        "upcoming_appointments_count": upcoming_qs.count(),
+                        "upcoming_appointments": upcoming_list,
+                    },
+                    status=status.HTTP_200_OK,
+                )
+
+            else:
+                return Response(
+                    {"error": f"Dashboard stats not available for role '{user.role}'."},
                     status=status.HTTP_403_FORBIDDEN,
                 )
+
         except Exception as e:
             print(f"Error fetching dashboard stats: {str(e)}")
             return Response(
@@ -258,6 +393,7 @@ class ListCompaniesView(APIView):
                         "user_id": review.review_by.id,
                         "created_at": review.created_at.isoformat(),
                         "is_current_user_review": review.review_by.id == request.user.id,
+
                     })
 
                 # Add ratings + review data
@@ -364,7 +500,12 @@ class SendReferralView(APIView):
 
             if request.user.email == referred_to_email:
                 return Response(
-                    {"error": "You cannot refer yourself"},
+                    {"error": "You cannot refer yourself, change email address"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            if request.user.phone == referred_to_phone:
+                return Response(
+                    {"error": "You cannot refer yourself, change phone number"},
                     status=status.HTTP_400_BAD_REQUEST,
                 )
 
@@ -713,87 +854,209 @@ class AssignRepView(APIView):
 
 
  
+
+from itertools import chain
+ 
 class ListSoloReferralView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
-        referrals = None
-        if request.data.get("referral_type") == "referred_by":
-            referrals = Referral.objects.filter(referred_by=request.user.id).select_related(
-                'referred_to', 'company', 'company__business_info'
-            )
-        elif request.data.get("referral_type") == "referred_to":
-            referrals = Referral.objects.filter(referred_to=request.user.id).select_related(
-                'referred_to', 'company', 'company__business_info'
-            )
-            
-        referral_list = []
-        for referral in referrals:  
-            # Get company information
+        user = request.user
+
+        # Fetch both directions with related objects for fewer queries
+        qs_by = (
+            Referral.objects
+            .filter(referred_by=user)
+            .select_related('referred_by', 'referred_to', 'company', 'company__business_info')
+            .order_by('-created_at')
+        )
+        qs_to = (
+            Referral.objects
+            .filter(referred_to=user)
+            .select_related('referred_by', 'referred_to', 'company', 'company__business_info')
+            .order_by('-created_at')
+        )
+
+        def serialize(referral, referral_type: str):
+            """
+            referral_type: "by" for referrals created by current user,
+                           "to" for referrals where current user is the recipient.
+            """
+            # --- Company info ---
             company_name = ""
             company_type = ""
-            company_image = None
             industry = ""
-            
-            try:
-                if hasattr(referral.company, 'business_info'):
-                    business_info = referral.company.business_info
-                    company_name = business_info.company_name
-                    company_type = business_info.biz_type
-                    industry = business_info.industry
-                elif hasattr(referral.company, 'company_name'):
-                    # If company is directly a BusinessInfo object
-                    company_name = referral.company.company_name
-                    company_type = referral.company.biz_type if hasattr(referral.company, 'biz_type') else ""
-                
-                # Get company image from user profile
-                if referral.company.image:
-                    company_image = generate_presigned_url(f"media/{referral.company.image}", expires_in=3600)
-            except AttributeError:
-                # Handle cases where company relationships might not exist
-                company_name = "Unknown Company"
-                company_type = "Unknown"
-            display_name = company_name
-            if not display_name:
-                display_name = business_info.user.full_name 
+            company_image_url = None
 
-            
-            
-            referral_list.append({
+            try:
+                # Preferred display name: BusinessInfo.company_name → fallback to company user's full_name
+                if hasattr(referral.company, "business_info") and referral.company.business_info:
+                    biz = referral.company.business_info
+                    company_name = biz.company_name or ""
+                    avg_rating = biz.avg_rating
+                    company_type = getattr(biz, "biz_type", "") or ""
+                    industry = getattr(biz, "industry", "") or ""
+                if not company_name:
+                    company_name = referral.company.full_name or ""
+
+                # Company image (stored on user model per your code)
+                if getattr(referral.company, "image", None):
+                    company_image_url = _public_or_presigned(referral.company.image)
+            except Exception:
+                company_name = company_name or "Unknown Company"
+                company_type = company_type or "Unknown"
+                avg_rating = avg_rating or 0
+
+            # --- People images (safe/public or presigned) ---
+            referred_to_image = IMAGEURL(referral.referred_to.image) if getattr(referral.referred_to, "image", None) else None
+            referred_by_image = IMAGEURL(referral.referred_by.image) if getattr(referral.referred_by, "image", None) else None
+
+            # --- Dates ---
+            created_display = referral.created_at.strftime("%d %b %Y") if referral.created_at else None
+            created_order = referral.updated_at.timestamp() if referral.updated_at else 0
+
+            return {
                 "id": referral.id,
                 "reference_id": referral.reference_id,
+
                 "referred_to_email": referral.referred_to.email,
                 "referred_to_name": referral.referred_to.full_name,
-                "referred_to_image": IMAGEURL(referral.referred_to.image) if referral.referred_to.image else None,
+                "referred_to_image": referred_to_image,
+
                 "referred_by_email": referral.referred_by.email,
                 "referred_by_name": referral.referred_by.full_name,
-                "referred_by_image":  IMAGEURL(referral.referred_by.image) if referral.referred_by.image else None,
+                "referred_by_image": referred_by_image,
+
                 "industry": industry,
-                "company_name": display_name,
-                "company_image": company_image,
+                "company_name": company_name,  
+                "avg_rating": avg_rating,  
+                "company_image": company_image_url,
                 "company_type": company_type,
+
                 "status": referral.status,
-                "date": referral.created_at.strftime("%d %b %Y") if referral.created_at else None,
-                "company_image": company_image,
+                "date": created_display,
+
                 "reason": referral.service_type,
                 "urgency": referral.urgency,
                 "notes": referral.notes,
                 "privacy": referral.privacy_opted,
                 "referred_by_approval": referral.referred_by_approval,
-                "referral_type": request.data.get("referral_type"),
-            })
 
+                # what you asked for:
+                "referral_type": "by" if referral_type == "by" else "to",
+
+                # internal field for sorting (dropped before response)
+                "_date_order": created_order,
+            }
+
+        # Build one combined list
+        combined = []
+        combined.extend(serialize(r, "by") for r in qs_by)
+        combined.extend(serialize(r, "to") for r in qs_to)
+
+        # Newest first
+        combined.sort(key=lambda x: x["_date_order"], reverse=True)
+        for item in combined:
+            item.pop("_date_order", None)
 
         return Response(
             {
                 "message": "Referral list retrieved successfully",
-                "referrals": referral_list,
+                "referrals": combined,   # single array with both "by" and "to"
+                "total": len(combined),
             },
             status=status.HTTP_200_OK,
         )
-    
+ 
 
+class ReferralView(APIView):
+    permission_classes = [IsAuthenticated]
 
+    def post(self, request):
+        user = request.user
+        reference_id = request.data.get("reference_id")
+
+        if not reference_id:
+            return Response(
+                {"error": "Missing required field: reference_id"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Fetch referral either sent or received by the user
+        referral = (
+            Referral.objects
+            .filter(reference_id=reference_id)
+            .select_related('referred_by', 'referred_to', 'company', 'company__business_info')
+            .first()
+        )
+
+        if not referral:
+            return Response(
+                {"error": "Referral not found"},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        # Determine referral type
+        referral_type = "by" if referral.referred_by == user else "to" if referral.referred_to == user else "unknown"
+
+        def serialize(referral, referral_type: str):
+            company_name = ""
+            company_type = ""
+            industry = ""
+            company_image_url = None
+
+            try:
+                if hasattr(referral.company, "business_info") and referral.company.business_info:
+                    biz = referral.company.business_info
+                    company_name = biz.company_name or ""
+                    company_type = getattr(biz, "biz_type", "") or ""
+                    industry = getattr(biz, "industry", "") or ""
+                if not company_name:
+                    company_name = referral.company.full_name or ""
+
+                if getattr(referral.company, "image", None):
+                    company_image_url = _public_or_presigned(referral.company.image)
+            except Exception:
+                company_name = company_name or "Unknown Company"
+                company_type = company_type or "Unknown"
+
+            referred_to_image = IMAGEURL(referral.referred_to.image) if getattr(referral.referred_to, "image", None) else None
+            referred_by_image = IMAGEURL(referral.referred_by.image) if getattr(referral.referred_by, "image", None) else None
+
+            created_display = referral.created_at.strftime("%d %b %Y") if referral.created_at else None
+
+            return {
+                "id": referral.id,
+                "reference_id": referral.reference_id,
+                "referred_to_email": referral.referred_to.email,
+                "referred_to_name": referral.referred_to.full_name,
+                "referred_to_image": referred_to_image,
+                "referred_by_email": referral.referred_by.email,
+                "referred_by_name": referral.referred_by.full_name,
+                "referred_by_image": referred_by_image,
+                "industry": industry,
+                "company_name": company_name,
+                "company_image": company_image_url,
+                "company_type": company_type,
+                "status": referral.status,
+                "date": created_display,
+                "reason": referral.service_type,
+                "urgency": referral.urgency,
+                "notes": referral.notes,
+                "privacy": referral.privacy_opted,
+                "referred_by_approval": referral.referred_by_approval,
+                "referral_type": referral_type,
+            }
+
+        data = serialize(referral, referral_type)
+
+        return Response(
+            {
+                "message": "Referral retrieved successfully",
+                "referral": data,
+            },
+            status=status.HTTP_200_OK,
+        )
 
 
 class UpdateReferralPrivacyView(APIView):
@@ -876,6 +1139,7 @@ class ListReferralView(APIView):
                     business_info = referral.company.business_info
                     company_name = business_info.company_name
                     company_type = business_info.biz_type
+                    avg_rating = business_info.avg_rating
                     industry = business_info.industry
                 elif hasattr(referral.company, 'company_name'):
                     # If company is directly a BusinessInfo object
@@ -901,6 +1165,7 @@ class ListReferralView(APIView):
                 "industry": industry,
                 "company_name": display_name,
                 "company_type": company_type,
+                "avg_rating": avg_rating,
                 "status": referral.status,
                 "date": referral.created_at.strftime("%d %b %Y") if referral.created_at else None,
                 "company_image": company_image,
@@ -944,6 +1209,7 @@ class ListCompanyReferralView(APIView):
                 if hasattr(referral.company, 'business_info'):
                     business_info = referral.company.business_info
                     company_name = business_info.company_name
+                    avg_rating = business_info.avg_rating
                     company_type = business_info.biz_type
                     industry = business_info.industry
                 elif hasattr(referral.company, 'company_name'):
@@ -954,6 +1220,7 @@ class ListCompanyReferralView(APIView):
             except AttributeError:
                 company_name = "Unknown Company"
                 company_type = "Unknown"
+                avg_rating = 0
 
             # Fix the display_name logic
             display_name = company_name
@@ -978,16 +1245,18 @@ class ListCompanyReferralView(APIView):
             referral_list.append({
                 "id": referral.id,
                 "reference_id": referral.reference_id,
+                "referred_to_id": referral.referred_to.id,
                 "referred_to_email": referral.referred_to.email,
                 "referred_to_name": referral.referred_to.full_name,
                 "referred_to_image": IMAGEURL(referral.referred_to.image) if referral.referred_to.image else None,
                 "referred_to_phone": referral.referred_to.phone,
-                 "referred_by_email": referral.referred_by.email,
+                "referred_by_email": referral.referred_by.email,
                 "referred_by_name": referral.referred_by.full_name,
                 "referred_by_image": IMAGEURL(referral.referred_by.image) if referral.referred_by.image else None,
                 "industry": industry,
                 "company_name": display_name,
                 "company_type": company_type,
+                "avg_rating": avg_rating,
                 "company_approval": referral.company_approval,
                 "referred_by_approval": referral.referred_by_approval,
                 "status": referral.status,
@@ -1091,6 +1360,7 @@ class ListRepReferralView(APIView):
                     company_name = business_info.company_name
                     company_type = business_info.biz_type
                     industry = business_info.industry
+                    avg_rating = business_info.avg_rating
                 elif hasattr(referral.company, 'company_name'):
                     # If company is directly a BusinessInfo object
                     company_name = referral.company.company_name
@@ -1103,6 +1373,8 @@ class ListRepReferralView(APIView):
                 # Handle cases where company relationships might not exist
                 company_name = "Unknown Company"
                 company_type = "Unknown"
+                avg_rating = 0
+
             
             display_name = company_name
             if not display_name and business_info:
@@ -1123,7 +1395,9 @@ class ListRepReferralView(APIView):
                 "referred_by_image": IMAGEURL(referral.referred_by.image) if referral.referred_by.image else None,
                 "industry": industry,
                 "company_name": display_name,
+                "company_name": display_name,
                 "company_type": company_type,
+                "avg_rating": avg_rating,
                 "status": referral.status,
                 "date": referral.created_at.strftime("%d %b %Y") if referral.created_at else None,
                 "company_image": company_image,
@@ -1169,6 +1443,8 @@ class SendAcceptView(APIView):
         referral.status = "Friend opted in" if approval else "cancelled"
         referral.save()
 
+        
+
         log_activity(
             event="friend_optin" if approval else "friend_optin",  # keep single event; you can split if you like
             actor=referral.referred_to,   # friend is the actor
@@ -1177,6 +1453,20 @@ class SendAcceptView(APIView):
             body=f"{referral.referred_to.full_name} {'accepted' if approval else 'rejected'} the referral",
             meta={"approval": bool(approval)},
         )
+        if hasattr(referral.company, 'business_info'):
+            business_info = referral.company.business_info
+            if business_info.biz_type == 'sole' and referral.status != 'cancelled':
+                referral.status = "in_progress"
+                referral.save()
+
+            log_activity(
+                event="Company Accepted",  # keep single event; you can split if you like
+                actor=referral.referred_to,   # friend is the actor
+                referral=referral,
+                title="Company Accepted" if approval else "Company Rejected",
+                body=f"{business_info.company_name} {'accepted' if approval else 'rejected'} the referral",
+                meta={"approval": bool(approval)},
+            )
 
 
         print(f"\n\n Preparing to send push notifications for referral ID {referral.id}")
@@ -1628,114 +1918,3 @@ class RewardsView(APIView):
 
 
 
-
-
-# from itertools import chain
-
-# class ListSoloReferralView(APIView):
-#     permission_classes = [IsAuthenticated]
-
-#     def post(self, request):
-#         user = request.user
-
-#         # Fetch both directions with related objects for fewer queries
-#         qs_by = (
-#             Referral.objects
-#             .filter(referred_by=user)
-#             .select_related('referred_by', 'referred_to', 'company', 'company__business_info')
-#             .order_by('-created_at')
-#         )
-#         qs_to = (
-#             Referral.objects
-#             .filter(referred_to=user)
-#             .select_related('referred_by', 'referred_to', 'company', 'company__business_info')
-#             .order_by('-created_at')
-#         )
-
-#         def serialize(referral, referral_type: str):
-#             """
-#             referral_type: "by" for referrals created by current user,
-#                            "to" for referrals where current user is the recipient.
-#             """
-#             # --- Company info ---
-#             company_name = ""
-#             company_type = ""
-#             industry = ""
-#             company_image_url = None
-
-#             try:
-#                 # Preferred display name: BusinessInfo.company_name → fallback to company user's full_name
-#                 if hasattr(referral.company, "business_info") and referral.company.business_info:
-#                     biz = referral.company.business_info
-#                     company_name = biz.company_name or ""
-#                     company_type = getattr(biz, "biz_type", "") or ""
-#                     industry = getattr(biz, "industry", "") or ""
-#                 if not company_name:
-#                     company_name = referral.company.full_name or ""
-
-#                 # Company image (stored on user model per your code)
-#                 if getattr(referral.company, "image", None):
-#                     company_image_url = _public_or_presigned(referral.company.image)
-#             except Exception:
-#                 company_name = company_name or "Unknown Company"
-#                 company_type = company_type or "Unknown"
-
-#             # --- People images (safe/public or presigned) ---
-#             referred_to_image = IMAGEURL(referral.referred_to.image) if getattr(referral.referred_to, "image", None) else None
-#             referred_by_image = IMAGEURL(referral.referred_by.image) if getattr(referral.referred_by, "image", None) else None
-
-#             # --- Dates ---
-#             created_display = referral.created_at.strftime("%d %b %Y") if referral.created_at else None
-#             created_order = referral.updated_at.timestamp() if referral.updated_at else 0
-
-#             return {
-#                 "id": referral.id,
-#                 "reference_id": referral.reference_id,
-
-#                 "referred_to_email": referral.referred_to.email,
-#                 "referred_to_name": referral.referred_to.full_name,
-#                 "referred_to_image": referred_to_image,
-
-#                 "referred_by_email": referral.referred_by.email,
-#                 "referred_by_name": referral.referred_by.full_name,
-#                 "referred_by_image": referred_by_image,
-
-#                 "industry": industry,
-#                 "company_name": company_name,
-#                 "company_image": company_image_url,
-#                 "company_type": company_type,
-
-#                 "status": referral.status,
-#                 "date": created_display,
-
-#                 "reason": referral.service_type,
-#                 "urgency": referral.urgency,
-#                 "notes": referral.notes,
-#                 "privacy": referral.privacy_opted,
-#                 "referred_by_approval": referral.referred_by_approval,
-
-#                 # what you asked for:
-#                 "referral_type": "by" if referral_type == "by" else "to",
-
-#                 # internal field for sorting (dropped before response)
-#                 "_date_order": created_order,
-#             }
-
-#         # Build one combined list
-#         combined = []
-#         combined.extend(serialize(r, "by") for r in qs_by)
-#         combined.extend(serialize(r, "to") for r in qs_to)
-
-#         # Newest first
-#         combined.sort(key=lambda x: x["_date_order"], reverse=True)
-#         for item in combined:
-#             item.pop("_date_order", None)
-
-#         return Response(
-#             {
-#                 "message": "Referral list retrieved successfully",
-#                 "referrals": combined,   # single array with both "by" and "to"
-#                 "total": len(combined),
-#             },
-#             status=status.HTTP_200_OK,
-#         )

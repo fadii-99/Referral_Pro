@@ -89,11 +89,13 @@ class ChatRoom(models.Model):
         """Get display name based on viewer's role"""
         if viewer == self.solo_user:
             if hasattr(self.company_user, "business_info"):
-                return self.company_user.business_info.company_name
+                if not self.company_user.business_info.company_name:
+                    return self.company_user.full_name + f" #{self.referral.reference_id}"
+                return self.company_user.business_info.company_name + f" #{self.referral.reference_id}"
             return self.company_user.full_name
         elif viewer == self.rep_user or viewer == self.company_user:
             # Rep or company sees solo user name
-            return self.solo_user.full_name
+            return self.solo_user.full_name + f" #{self.referral.reference_id}"
         else:
             return "Unknown"
     
@@ -160,7 +162,7 @@ class ChatRoom(models.Model):
     def create_room_for_referral(cls, referral, solo_user, assigned_rep=None):
         company_user = referral.company
         
-        if hasattr(company_user, 'business_info') and company_user.business_info.biz_type == 'individual':
+        if hasattr(company_user, 'business_info') and company_user.business_info.biz_type == 'sole':
             room_type = 'company_solo'
             room_id = f"company_{company_user.id}_solo_{solo_user.id}_ref_{referral.id}"
             rep_user = None

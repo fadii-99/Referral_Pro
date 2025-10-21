@@ -4,7 +4,7 @@ from django.conf import settings
 from django.utils import timezone
 from django.utils.timezone import localtime
 from django.db import models
-
+from django.db.models import Avg
 # rest framework
 from rest_framework_simplejwt.tokens import RefreshToken, TokenError
 from rest_framework.views import APIView
@@ -628,7 +628,7 @@ class SocialLoginView(APIView):
                 existing_user.save()
                 
                 return Response({
-                    "user": {"email": existing_user.email, "name": existing_user.full_name, "role": existing_user.role}, 
+                    "user": {"email": existing_user.email, "name": existing_user.full_name, "role": existing_user.role, "is_phone_set": True if existing_user.phone else False},
                     "tokens": tokens
                 })
 
@@ -647,7 +647,7 @@ class SocialLoginView(APIView):
             user.save()
             
             return Response({
-                "user": {"email": user.email, "name": user.full_name, "role": user.role}, 
+                "user": {"email": user.email, "name": user.full_name, "role": user.role, "is_phone_set": True if user.phone else False},
                 "tokens": tokens
             })
 
@@ -724,7 +724,7 @@ class SocialLoginView(APIView):
 
 
 
-
+ 
 # -------------------------
 # Password Reset Flow
 # -------------------------
@@ -735,8 +735,6 @@ class SendOTPView(APIView):
     def post(self, request):
         email = request.data.get('email')
         phone = request.data.get('phone')
-
-
 
         # Find user by email or phone
         try:
@@ -749,7 +747,7 @@ class SendOTPView(APIView):
             return Response({"error": "No account found with these credentials"}, status=404)
 
         if user.role != request.data.get('role'):
-            return Response({"error": f"Unauthorized access: your profile type does not match this endpoint."}, status=404)
+            return Response({"error": f"Unauthorized access for this {user.role}."}, status=404)
 
         # Generate OTP
         otp = generate_otp(user, purpose="password_reset", expires_in=10)
@@ -1015,7 +1013,7 @@ class TestEmployeeManagementView(APIView):
 
 
 
-
+ 
 class SendResetPasswordView(APIView):
     permission_classes = [IsAuthenticated]
     def get(self, request):
@@ -1042,7 +1040,7 @@ class SendResetPasswordView(APIView):
 
 
 
-
+ 
 # ==========================================
 # ==========================================
 
@@ -1050,7 +1048,8 @@ import json
 from rest_framework_simplejwt.tokens import UntypedToken
 from rest_framework_simplejwt.exceptions import InvalidToken, TokenError
 from datetime import datetime
-
+ 
+ 
 class UserInfoView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -1080,14 +1079,14 @@ class UserInfoView(APIView):
                 "image": image_url,
                 "is_passwordSet": user.is_passwordSet,
                 "is_paid": user.is_paid,
-
+                 "is_phone_set": True if user.phone else False
             }
         }
 
         # Add business info if exists
         if hasattr(user, 'business_info'):
             business_info = user.business_info
-            response_data["business_info"] = {
+            response_data['user']["business_info"] = {
                 "company_name": business_info.company_name,
                 "industry": business_info.industry,
                 "employees": business_info.employees,
@@ -1101,13 +1100,11 @@ class UserInfoView(APIView):
             }
             response_data["user"]["company_name"] =  business_info.company_name
 
-
-        
-
+        print(response_data)
         return Response(response_data, status=200)
 
 
-
+ 
 class UpdateUserView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -1167,6 +1164,30 @@ class UpdateUserView(APIView):
                 {"error": f"Failed to update user: {str(e)}"},
                 status=500
             )
+
+
+
+ 
+class PhoneSetView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        
+        user = request.user
+        data = request.data
+
+
+        if not data.get("phone"):
+            return Response({"error": "Enter Phone number."}, status=400)
+
+        user.phone = data.get("phone")
+        user.save()
+
+        return Response({"message": "User Phone Added successfully"}, status=200)
+
+
+
+
 
 
 # -------------------------
@@ -1295,11 +1316,11 @@ class AccountDeletionView(APIView):
             return Response({
                 "error": f"Failed to delete account: {str(e)}"
             }, status=500)
+ 
 
 
 
-
-
+ 
 class ResetPasswordView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -1332,6 +1353,7 @@ class ResetPasswordView(APIView):
 
 from firebase_admin import messaging
 
+ 
 class RegisterFCMTokenView(APIView):
     permission_classes = [IsAuthenticated]
     
@@ -1391,67 +1413,69 @@ class ReviewManagementView(APIView):
     def post(self, request):
         """Create a new review (Solo users only)"""
         print(request.data)
-        
-        # if request.user.role != 'solo':
-        #     return Response({"error": "Only solo users can create reviews"}, status=403)
-        
-        # Extract data from request
+
         business_id = request.data.get('business_id')
         review_rating = request.data.get('review_rating')
         review_feedback = request.data.get('review_feedback', '')
-        
-        # Validation
+
+        # --- Validation ---
         if not business_id:
             return Response({"error": "Business ID is required"}, status=400)
-        
         if not review_rating:
             return Response({"error": "Review rating is required"}, status=400)
-        
+
         try:
             review_rating = int(review_rating)
-            if review_rating < 1 or review_rating > 5:
+            if not (1 <= review_rating <= 5):
                 return Response({"error": "Review rating must be between 1 and 5"}, status=400)
         except (ValueError, TypeError):
             return Response({"error": "Review rating must be a valid number"}, status=400)
-        
-        # Check if business exists
+
+        # --- Check if business exists ---
         try:
             business = User.objects.get(id=business_id, role='company')
         except User.DoesNotExist:
             return Response({"error": "Business not found"}, status=404)
-        
-        # Check if user already reviewed this business
+
+        # --- Check duplicate review ---
         existing_review = Review.objects.filter(review_by=request.user, business=business).first()
         if existing_review:
             return Response({"error": "You have already reviewed this business"}, status=400)
-        
+
         try:
-            # Create the review
+            # --- Create the review ---
             review = Review.objects.create(
                 business=business,
                 review_by=request.user,
                 review_rating=review_rating,
                 review_feedback=review_feedback
             )
-            
-            # Handle image uploads if any
+
+            # --- Handle images ---
             images = request.FILES.getlist('images')
             review_images = []
-            
             for image in images:
-                review_image = ReviewImage.objects.create(
-                    review=review,
-                    image=image
-                )
+                review_image = ReviewImage.objects.create(review=review, image=image)
                 review_images.append({
                     "id": review_image.id,
-                    "image_url": generate_presigned_url(f"media/{review_image.image}", expires_in=3600) if review_image.image else None
+                    "image_url": generate_presigned_url(f"media/{review_image.image}", expires_in=3600)
+                    if review_image.image else None
                 })
-            
-            # Prepare response data
-            business_name = business.business_info.company_name if hasattr(business, 'business_info') else business.full_name or business.email
+
+            # --- Calculate and update business average rating ---
+            avg_rating = Review.objects.filter(business=business).aggregate(avg=Avg('review_rating'))['avg'] or 0
+            if hasattr(business, 'business_info'):
+                business.business_info.avg_rating = round(avg_rating, 2)
+                business.business_info.save(update_fields=['avg_rating'])
+
+            # --- Prepare response data ---
+            business_name = (
+                business.business_info.company_name
+                if hasattr(business, 'business_info')
+                else business.full_name or business.email
+            )
+
             reviewer_image_url = None
-            
             if request.user.image:
                 try:
                     if str(request.user.image).startswith(('http://', 'https://')):
@@ -1460,34 +1484,37 @@ class ReviewManagementView(APIView):
                         reviewer_image_url = generate_presigned_url(f"media/{request.user.image}", expires_in=3600)
                 except (ValueError, FileNotFoundError):
                     reviewer_image_url = None
-            
+
             review_data = {
                 "id": review.id,
                 "business": {
                     "id": business.id,
                     "name": business_name,
-                    "email": business.email
+                    "email": business.email,
+                    "avg_rating": round(avg_rating, 2),
                 },
                 "review_by": {
                     "id": request.user.id,
                     "name": request.user.full_name or request.user.email,
-                    "image": reviewer_image_url
+                    "image": reviewer_image_url,
                 },
                 "review_rating": review.review_rating,
                 "review_feedback": review.review_feedback,
                 "images": review_images,
                 "created_at": review.created_at.isoformat(),
-                "updated_at": review.updated_at.isoformat() if review.updated_at else None
+                "updated_at": review.updated_at.isoformat() if review.updated_at else None,
             }
-            
+
             return Response({
                 "message": "Review created successfully",
                 "review": review_data
             }, status=201)
-            
+
         except Exception as e:
             print(str(e))
             return Response({"error": f"Failed to create review: {str(e)}"}, status=500)
+
+
     
     def get(self, request):
         """List reviews - different behavior based on user role"""
@@ -1656,7 +1683,8 @@ class ReviewManagementView(APIView):
             
             # Save the review updates
             review.save()
-            
+
+
             # Handle image updates if provided
             new_images = request.FILES.getlist('images')
             if new_images:
@@ -1712,6 +1740,11 @@ class ReviewManagementView(APIView):
                     })
                 except (ValueError, FileNotFoundError):
                     continue
+
+            avg_rating = Review.objects.filter(business=business).aggregate(avg=Avg('review_rating'))['avg'] or 0
+            if hasattr(business, 'business_info'):
+                business.business_info.avg_rating = round(avg_rating, 2)
+                business.business_info.save(update_fields=['avg_rating'])
             
             business_name = review.business.business_info.company_name if hasattr(review.business, 'business_info') else review.business.full_name or review.business.email
             

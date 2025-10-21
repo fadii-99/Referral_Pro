@@ -24,6 +24,7 @@ from .views import (
     ReviewManagementView,
     BusinessReviewsView,
     ReviewDetailView,
+    PhoneSetView
 )
 
 
@@ -44,6 +45,7 @@ urlpatterns = [
 
     path('get_user/', UserInfoView.as_view(), name='get_user'),
     path('update_user/', UpdateUserView.as_view(), name='update_user'),
+    path('phone_set/', PhoneSetView.as_view(), name='phone_set'),
 
     path('employees/', EmployeeManagementView.as_view(), name='send_invite'),
     path('employees_post/', TestEmployeeManagementView.as_view(), name='send_invite'),
