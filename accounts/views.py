@@ -568,6 +568,7 @@ class SocialLoginView(APIView):
                 user_info = self._verify_facebook_token(token)
             else:  # apple
                 user_info = self._verify_apple_token(token)
+                print(user_info)
                 if user_info.get("is_relay"):
                     return Response({"error": "hidden"}, status=400)
         except Exception as e:
@@ -681,46 +682,44 @@ class SocialLoginView(APIView):
             "platform": "facebook"
         }
 
-    def _verify_apple_token(self, token: str):
-        # 1. Decode header to find kid
+    def _verify_apple_token(self, token: str) -> dict:
+        # 1) Decode unverified header
         header = jwt.get_unverified_header(token)
         kid = header["kid"]
 
-        # 2. Fetch Apple public keys
-        apple_keys = requests.get("https://appleid.apple.com/auth/keys").json()["keys"]
+        # 2) Fetch Apple JWKS (cache this in prod)
+        jwks = requests.get("https://appleid.apple.com/auth/keys", timeout=5).json()["keys"]
 
-        # 3. Match correct key
-        key = next((k for k in apple_keys if k["kid"] == kid), None)
+        # 3) Find key
+        key = next((k for k in jwks if k["kid"] == kid), None)
         if not key:
             raise ValueError("Public key not found for given kid")
 
-        # 4. Build public key
+        # 4) Build public key
         public_key = RSAAlgorithm.from_jwk(key)
 
-        # 5. Decode and verify JWT
+        # 5) Verify + decode
         info = jwt.decode(
             token,
             key=public_key,
             algorithms=["RS256"],
-            audience=settings.APPLE_BUNDLE_ID,
+            audience=settings.APPLE_BUNDLE_ID,   # NOTE: for web it’s the Service ID
             issuer="https://appleid.apple.com"
         )
-        print("\nApple token info:", info)
-        emaill = info.get("email")
-        print("\nApple email:", emaill)
 
-        is_relay = False
+        apple_email = info.get("email")  # may be None on returning sign-ins
+        is_relay = bool(apple_email and apple_email.endswith("@privaterelay.appleid.com"))
 
-        if emaill.endswith("@privaterelay.appleid.com"):
-            is_relay = True
-
-
+        # IMPORTANT: do not expect name in the token
         return {
-            "email": info.get("email"),
-            "name": info.get("name", ""),
-            "sub": info.get("sub") ,"is_relay": is_relay,
-            "platform": "apple" 
+            "sub": info["sub"],                   # stable Apple user id for your app
+            "email": apple_email,                 # may be None after first time
+            "is_relay": is_relay,
+            "platform": "apple",
+            "nonce_supported": info.get("nonce_supported", False),
+            "auth_time": info.get("auth_time"),
         }
+
 
 
 
@@ -873,6 +872,12 @@ class EmployeeManagementView(APIView):
         if User.objects.filter(email=email).exists():
             return Response({"error": "User with this email already exists"}, status=status.HTTP_400_BAD_REQUEST)
 
+        
+        sbData = Subscription.objects.filter(user=request.user)
+        if sbData.used == sbData.seats_limit:
+            return Response({"error": "Seat limit reached. Upgrade your subscription to add more employees."}, status=status.HTTP_400_BAD_REQUEST)
+
+
         password = generate_random_password()
 
         user = User.objects.create_user(
@@ -883,6 +888,10 @@ class EmployeeManagementView(APIView):
             is_passwordSet=False,
             parent_company=request.user if request.user.role == "company" else None
         )
+
+
+        sbdata.used += 1
+        sbdata.save()
 
         try:
             send_invitation_email(email, name, password)
@@ -1179,6 +1188,9 @@ class PhoneSetView(APIView):
 
         if not data.get("phone"):
             return Response({"error": "Enter Phone number."}, status=400)
+
+        if User.objects.filter(phone=data.get("phone")).exists():
+            return Response({"error": "Phone number already registered"}, status=400)
 
         user.phone = data.get("phone")
         user.save()

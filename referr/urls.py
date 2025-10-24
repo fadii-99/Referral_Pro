@@ -1,7 +1,7 @@
 # referr/urls.py
 from django.urls import path
 
-from .views import ListCompaniesView, SendReferralView,ListSoloReferralView, ListReferralView,ListCompanyReferralView, SendAppInvitationView, ListAssignedReferralView,CompleteReferralView, AssignRepView, ListRepReferralView, SendAcceptView, UpdateReferralPrivacyView, FavoriteCompanyView, DashboardStatsView, CancelReferralView, RewardsView, ReferralView
+from .views import ListCompaniesView, SendReferralView,ListSoloReferralView, ListReferralView,ListCompanyReferralView, SendAppInvitationView, ListAssignedReferralView,CompleteReferralView, Complete1ReferralView, AssignRepView, ListRepReferralView, SendAcceptView, UpdateReferralPrivacyView, FavoriteCompanyView, DashboardStatsView, CancelReferralView, RewardsView, ReferralView
 
 urlpatterns = [
     path("dashboard/", DashboardStatsView.as_view(), name="dashboard"),
@@ -16,6 +16,7 @@ urlpatterns = [
     path("list_assigned_referral/", ListAssignedReferralView.as_view(), name="list_assigned_referral"),
     path("assign_rep/", AssignRepView.as_view(), name="assign_rep"),
     path("complete_referral/", CompleteReferralView.as_view(), name="complete_referral"),
+    path("complete1_referral/", Complete1ReferralView.as_view(), name="complete1_referral"),
     path("cancel_referral/", CancelReferralView.as_view(), name="cancel_referral"),
     path("add_manually/", SendAppInvitationView.as_view(), name="add_manually"),
     path('favorite/', FavoriteCompanyView.as_view(), name='add_favorite'),

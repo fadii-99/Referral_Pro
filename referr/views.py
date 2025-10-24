@@ -95,6 +95,9 @@ class DashboardStatsView(APIView):
                     company=user, status="cancelled"
                 ).count()
 
+                # ✅ Fix division by zero error
+                referrals_accepted_percentage = (referrals_accepted * 100) / referrals_created if referrals_created > 0 else 0
+
                 # ----------------------
                 # Graph data (last 7 days)
                 # ----------------------
@@ -125,8 +128,6 @@ class DashboardStatsView(APIView):
                     .filter(company=user, status__in=['in_progress', 'completed'])
                     .annotate(first_assigned=Min("assignments__assigned_at"))
                 )
-
-
 
                 avg_delta = (
                     resp_qs.exclude(first_assigned__isnull=True)
@@ -164,7 +165,7 @@ class DashboardStatsView(APIView):
                 return Response(
                     {
                         "referrals_created": referrals_created,
-                        "referrals_accepted_percentage": (referrals_accepted * 100) / referrals_created,
+                        "referrals_accepted_percentage": referrals_accepted_percentage,
                         "referrals_accepted": referrals_accepted,
                         "referrals_this_month": Referral.objects.filter(
                             company=user,
@@ -558,8 +559,8 @@ class SendReferralView(APIView):
 
             notification_body = f"{request.user.full_name} referred you to {company.company_name if company.company_name else COMPANY.full_name}"
             send_push_notification_to_user(
-                user=request.user,
-                title=f"New Referral from {request.user.full_name}",
+                user=referral.company,
+                title=f"New Referral from {company.company_name if company.company_name else COMPANY.full_name}",
                 body=notification_body,
                 data=notification_data
             )
@@ -1455,9 +1456,9 @@ class SendAcceptView(APIView):
         )
         if hasattr(referral.company, 'business_info'):
             business_info = referral.company.business_info
-            if business_info.biz_type == 'sole' and referral.status != 'cancelled':
-                referral.status = "in_progress"
-                referral.save()
+            # if business_info.biz_type == 'sole' and referral.status != 'cancelled':
+            #     referral.status = "in_progress"
+            #     referral.save()
 
             log_activity(
                 event="Company Accepted",  # keep single event; you can split if you like
@@ -1541,7 +1542,9 @@ class CompleteReferralView(APIView):
 
             try:
                 referral = Referral.objects.get(id=referral_id)
-            except Referral.DoesNotExist:
+                print(referral.id)
+            except Exception as e:
+                print(f"Error fetching referral: {str(e)}")
                 return Response({"error": "Referral not found"}, status=status.HTTP_404_NOT_FOUND)
 
             # Check assignment exists
@@ -1638,6 +1641,98 @@ class CompleteReferralView(APIView):
                 {"error": f"Failed to complete referral: {str(e)}"},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
+
+
+
+
+class Complete1ReferralView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        try:
+            print(request.data)
+            referral_id = request.data.get("referral_id")
+            status_value = request.data.get("status", "completed")
+            note = request.data.get("note")
+            if not referral_id:
+                return Response(
+                    {"error": "referral_id is required"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            try:
+                referral = Referral.objects.get(id=referral_id)
+            except Referral.DoesNotExist:
+                return Response({"error": "Referral not found"}, status=status.HTTP_404_NOT_FOUND)
+
+            # Check assignment exists
+            # if not assignment:
+            #     return Response({"error": "Referral not assigned"}, status=status.HTTP_400_BAD_REQUEST)
+
+            # Check that the logged-in user is the assigned employee
+            # if assignment.assigned_to != request.user:
+            #     return Response({"error": "You are not assigned to this referral"}, status=status.HTTP_403_FORBIDDEN)
+
+            # Update both referral and assignment statuses
+            referral.status = status_value
+            referral.save()
+
+            log_activity(
+                event="completed" if status_value == "completed" else "cancelled",
+                actor=request.user,
+                referral=referral,
+                title="Referral completed" if status_value == "completed" else "Referral cancelled",
+                body=f"{request.user.full_name} marked referral {referral.reference_id} as {status_value}",
+            )
+
+
+
+            # Payload for referred_by - company completed referral
+            payload_referred_by = {
+                "event": "referral.completed",
+                "unread": True,
+                "referral_id": referral.id,
+                "reference_id": referral.reference_id,
+                "title": f"Referral {status_value}",
+                "message": f"{referral.company.full_name} has {status_value} the referral #{referral.reference_id}",
+                "actors": {
+                    "referred_by_id": referral.referred_by.id,
+                    "referred_to_id": referral.referred_to.id,
+                    "company_id": referral.company.id,
+                    "rep_id": request.user.id
+                },
+                "meta": {
+                    "company_name": referral.company.full_name,
+                    "referred_by_name": referral.referred_by.full_name,
+                    "referred_to_name": referral.referred_to.full_name,
+                    "status": referral.status,
+                }
+            }
+
+            if status_value == "completed":
+                notification_data = {}
+
+                notification_body = f"Referral Completed #{referral.reference_id}"
+                send_push_notification_to_user(
+                    user=referral.company,
+                    title=f"Referral Completed #{referral.reference_id}",
+                    body=notification_body,
+                    data=notification_data
+                )
+
+            # Send different notifications to different users
+            notify_users([referral.referred_by.id], payload_referred_by)
+
+            return Response({"message": "Referral marked as completed"}, status=status.HTTP_200_OK)
+        except Exception as e:
+            print(f"Error completing referral: {str(e)}")
+            return Response(
+                {"error": f"Failed to complete referral: {str(e)}"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+
+
 
 
 class CancelReferralView(APIView):
@@ -1756,6 +1851,8 @@ class CancelReferralView(APIView):
             )
 
 
+
+
 class SendAppInvitationView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -1858,10 +1955,15 @@ class RewardsView(APIView):
                 # Get company name safely
                 try:
                     if hasattr(reward.referral.company, 'business_info'):
+                        print(reward.referral.company)
                         company_name = reward.referral.company.business_info.company_name
+                        print(company_name)
                     else:
+                        print(reward.referral.company.full_name)
+                        print(reward.referral.company.email)
                         company_name = reward.referral.company.full_name or reward.referral.company.email
-                except AttributeError:
+                except Exception as e:
+                    print(f"Error retrieving company name: {str(e)}")
                     company_name = "Unknown Company"
                 
                 reward_list.append({

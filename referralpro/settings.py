@@ -263,3 +263,9 @@ CHANNEL_LAYERS = {
         "BACKEND": "channels.layers.InMemoryChannelLayer",
     },
 }
+
+
+
+REFERRALPRO_ANDROID_URL = "https://play.google.com/store/apps/details?id=com.referralpro.app"
+REFERRALPRO_IOS_URL = "https://apps.apple.com/app/id1234567890"
+REFERRALPRO_WEBSITE_URL = "https://thereferralpro.com"
