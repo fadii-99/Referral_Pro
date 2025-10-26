@@ -734,6 +734,7 @@ class SendOTPView(APIView):
     def post(self, request):
         email = request.data.get('email')
         phone = request.data.get('phone')
+        print(request.data)
 
         # Find user by email or phone
         try:
@@ -744,8 +745,14 @@ class SendOTPView(APIView):
         except User.DoesNotExist as e:
             print("No user found with given email/phone", str(e))
             return Response({"error": "No account found with these credentials"}, status=404)
+        
+        role = request.data.get('role')
 
-        if user.role != request.data.get('role'):
+        if request.data.get('role') == "rep":
+            role = "employee"
+
+
+        if user.role != role:
             return Response({"error": f"Unauthorized access for this {user.role}."}, status=404)
 
         # Generate OTP
@@ -863,51 +870,57 @@ class EmployeeManagementView(APIView):
 
     def post(self, request):
         """Invite employee (send email + generate password)"""
-        email = request.data.get("email")
-        name = request.data.get("name")
-
-        if not email or not name:
-            return Response({"error": "Email and name are required"}, status=status.HTTP_400_BAD_REQUEST)
-
-        if User.objects.filter(email=email).exists():
-            return Response({"error": "User with this email already exists"}, status=status.HTTP_400_BAD_REQUEST)
-
-        
-        sbData = Subscription.objects.filter(user=request.user)
-        if sbData.used == sbData.seats_limit:
-            return Response({"error": "Seat limit reached. Upgrade your subscription to add more employees."}, status=status.HTTP_400_BAD_REQUEST)
-
-
-        password = generate_random_password()
-
-        user = User.objects.create_user(
-            email=email,
-            password=password,
-            full_name=name,
-            role="employee",
-            is_passwordSet=False,
-            parent_company=request.user if request.user.role == "company" else None
-        )
-
-
-        sbdata.used += 1
-        sbdata.save()
-
         try:
-            send_invitation_email(email, name, password)
-        except Exception as e:
-            user.delete()
-            return Response({"error": f"Failed to send invitation: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            email = request.data.get("email")
+            name = request.data.get("name")
 
-        return Response({
-            "message": "Invitation sent successfully",
-            "user": {
-                "id": user.id,
-                "email": user.email,
-                "name": user.full_name,
-                "role": user.role
-            }
-        }, status=status.HTTP_200_OK)
+            if not email or not name:
+                return Response({"error": "Email and name are required"}, status=status.HTTP_400_BAD_REQUEST)
+
+            if User.objects.filter(email=email).exists():
+                return Response({"error": "User with this email already exists"}, status=status.HTTP_400_BAD_REQUEST)
+
+
+            sbData = Subscription.objects.filter(user=request.user).first()
+            if sbData:
+                if sbData.seats_used == sbData.seats_limit:
+                    print("Seat limit reached")
+                    return Response({"error": "Seat limit reached. Upgrade your subscription to add more employees."}, status=status.HTTP_400_BAD_REQUEST)
+
+
+            password = generate_random_password()
+
+            user = User.objects.create_user(
+                email=email,
+                password=password,
+                full_name=name,
+                role="employee",
+                is_passwordSet=False,
+                parent_company=request.user if request.user.role == "company" else None
+            )
+
+            if sbData:
+                sbData.seats_used += 1
+                sbData.save()
+
+            try:
+                send_invitation_email(email, name, password)
+            except Exception as e:
+                user.delete()
+                return Response({"error": f"Failed to send invitation: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+            return Response({
+                "message": "Invitation sent successfully",
+                "user": {
+                    "id": user.id,
+                    "email": user.email,
+                    "name": user.full_name,
+                    "role": user.role
+                }
+            }, status=status.HTTP_200_OK)
+        except Exception as e:
+            print("Error inviting employee:", str(e))
+            return Response({"error": f"Failed to invite employee: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     def put(self, request):
         """Edit employee details"""

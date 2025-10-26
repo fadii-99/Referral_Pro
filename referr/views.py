@@ -493,11 +493,8 @@ class SendReferralView(APIView):
             request_description = data.get("request_description")
             permission_consent = data.get("permission_consent", False)
 
-            if not company_id or not referred_to_email or not referred_to_name:
-                return Response(
-                    {"error": "company_id, email, and name are required"},
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
+            
+
 
             if request.user.email == referred_to_email:
                 return Response(
@@ -515,14 +512,24 @@ class SendReferralView(APIView):
                 COMPANY = User.objects.get(id=company_id)
             except Exception as e:
                 return Response({"error": "Company not found"}, status=status.HTTP_404_NOT_FOUND)
-            
 
-            # If referred_to user exists, use it. Otherwise, create a placeholder.
-            referred_to_user, _ = User.objects.get_or_create(
-                email=referred_to_email,
-                
-                defaults={"full_name": referred_to_name, "phone": referred_to_phone, "role": "solo", 'is_to_be_registered': True},
-            )
+            referred_to_user = None
+            if referred_to_phone:
+                if not User.objects.filter(phone=referred_to_phone).exists():
+                    if referred_to_email and not User.objects.filter(email=referred_to_email, phone=referred_to_phone).exists():
+                        return Response(
+                            {"error": "Phone number already associated with another email."},
+                            status=status.HTTP_400_BAD_REQUEST,
+                        )
+                    referred_to_user = User.objects.create_user(
+                        phone=referred_to_phone,
+                        email=referred_to_email if referred_to_email else f"{referred_to_phone}@example.com",
+                        full_name=referred_to_name if referred_to_name else None,
+                    )
+                else:
+                    referred_to_user = User.objects.get(phone=referred_to_phone)
+                    
+
 
             referral = Referral.objects.create(
                 referred_by=request.user,
@@ -540,7 +547,7 @@ class SendReferralView(APIView):
                 actor=request.user,
                 referral=referral,
                 title="Referral sent",
-                body=f"{request.user.full_name} referred {referred_to_user.full_name or referred_to_email} to {COMPANY.full_name or company.company_name}",
+                body=f"{request.user.full_name} referred {referred_to_user.full_name } to {COMPANY.full_name if COMPANY.full_name else company.company_name}",
                 meta={
                     "referred_to_email": referred_to_email,
                     "urgency": urgency_level,
@@ -557,7 +564,7 @@ class SendReferralView(APIView):
             print(f"\n\n Preparing to send push notifications for referral ID {referral.id}")
 
 
-            notification_body = f"{request.user.full_name} referred you to {company.company_name if company.company_name else COMPANY.full_name}"
+            notification_body = f"Received referral for {referred_to_user.full_name} from {request.user.full_name}"
             send_push_notification_to_user(
                 user=referral.company,
                 title=f"New Referral from {company.company_name if company.company_name else COMPANY.full_name}",
@@ -565,7 +572,7 @@ class SendReferralView(APIView):
                 data=notification_data
             )
 
-            notification_body = f"{request.user.full_name} sent a referral to {referral.referred_to.full_name}"
+            notification_body = f"{request.user.full_name} has referred you to {company.company_name if company.company_name else COMPANY.full_name}"
             send_push_notification_to_user(
                 user=referral.referred_to,
                 title=f"New Referral to {request.user.full_name}",
@@ -596,7 +603,7 @@ class SendReferralView(APIView):
                     referral_code=referral.referred_by.referral_code
                 )
 
-
+            print(company.company_name)
             payload_referred_to = {
                 "event": "referral.sent",
                 "referral_id": referral.id,
@@ -1194,7 +1201,7 @@ class ListCompanyReferralView(APIView):
         if request.data.get("referral_id"):
             referrals = Referral.objects.filter(reference_id=request.data.get("referral_id"), company=request.user)
         else:
-            referrals = Referral.objects.filter(company=request.user)
+            referrals = Referral.objects.filter(company=request.user).order_by('-updated_at')
 
         referral_list = []  # Initialize referral_list
         
@@ -1456,18 +1463,18 @@ class SendAcceptView(APIView):
         )
         if hasattr(referral.company, 'business_info'):
             business_info = referral.company.business_info
-            # if business_info.biz_type == 'sole' and referral.status != 'cancelled':
-            #     referral.status = "in_progress"
-            #     referral.save()
+            if business_info.biz_type == 'sole' and referral.status != 'cancelled':
+                referral.status = "in_progress"
+                referral.save()
 
-            log_activity(
-                event="Company Accepted",  # keep single event; you can split if you like
-                actor=referral.referred_to,   # friend is the actor
-                referral=referral,
-                title="Company Accepted" if approval else "Company Rejected",
-                body=f"{business_info.company_name} {'accepted' if approval else 'rejected'} the referral",
-                meta={"approval": bool(approval)},
-            )
+            # log_activity(
+            #     event="Company Accepted",  # keep single event; you can split if you like
+            #     actor=referral.referred_to,   # friend is the actor
+            #     referral=referral,
+            #     title="Company Accepted" if approval else "Company Rejected",
+            #     body=f"{business_info.company_name if business_info.company_name else referral.company.full_name} {'accepted' if approval else 'rejected'} the referral",
+            #     meta={"approval": bool(approval)},
+            # )
 
 
         print(f"\n\n Preparing to send push notifications for referral ID {referral.id}")
@@ -1930,42 +1937,66 @@ class RewardsView(APIView):
 
     def get(self, request):
         try:
-            # Get all referral rewards for the current user
-            rewards = ReferralReward.objects.filter(user=request.user).select_related('referral').order_by('-awarded_at')
+            rewards = (
+                ReferralReward.objects
+                .filter(user=request.user)
+                .select_related(
+                    'referral',
+                    'referral__company',
+                    'referral__company__business_info'  # if this OneToOne exists
+                )
+                .order_by('-awarded_at')
+            )
+
             reward_list = []
-            
-            # Separate totals for different statuses
-            total_points_earned = 0  # Only completed rewards
-            total_points_pending = 0  # Pending rewards
-            total_amount_earned = 0.00
-            total_amount_pending = 0.00
-            
+
+            total_points_earned = 0
+            total_points_pending = 0
+            total_amount_earned = 0.0
+            total_amount_pending = 0.0
+
             for reward in rewards:
-                # Convert points to cash value (example: 1 point = $0.10)
                 cash_value = float(reward.points_awarded) * 0.10
-                
-                # Only count completed rewards in earned totals
+
                 if reward.status == "completed":
                     total_points_earned += reward.points_awarded
                     total_amount_earned += cash_value
                 elif reward.status == "pending":
                     total_points_pending += reward.points_awarded
                     total_amount_pending += cash_value
-                
-                # Get company name safely
-                try:
-                    if hasattr(reward.referral.company, 'business_info'):
-                        print(reward.referral.company)
-                        company_name = reward.referral.company.business_info.company_name
-                        print(company_name)
-                    else:
-                        print(reward.referral.company.full_name)
-                        print(reward.referral.company.email)
-                        company_name = reward.referral.company.full_name or reward.referral.company.email
-                except Exception as e:
-                    print(f"Error retrieving company name: {str(e)}")
-                    company_name = "Unknown Company"
-                
+
+                # ✅ correct source of company: reward.referral.company
+                company_user = getattr(reward.referral, "company", None)
+
+                # Safe defaults
+                company_name = ""
+                company_type = ""
+                industry = ""
+                avg_rating = None
+                company_image = None
+
+                if company_user:
+                    # If you have a BusinessInfo one-to-one on User (company_user.business_info)
+                    biz = getattr(company_user, "business_info", None)
+                    if biz:
+                        company_name = getattr(biz, "company_name", "") or ""
+                        company_type = getattr(biz, "biz_type", "") or ""
+                        industry = getattr(biz, "industry", "") or ""
+                        avg_rating = getattr(biz, "avg_rating", None)
+
+                    # Fallbacks to User fields if no business_info
+                    if not company_name:
+                        company_name = getattr(company_user, "company_name", "") or getattr(company_user, "full_name", "") or company_user.email
+                    if not company_type:
+                        company_type = getattr(company_user, "biz_type", "") or ""
+
+                    # Optional image presign if you store a file path on User.image
+                    image_field = getattr(company_user, "image", None)
+                    if image_field:
+                        company_image = generate_presigned_url(f"media/{image_field}", expires_in=3600)
+
+                referred_to_name = getattr(reward.referral.referred_to, "full_name", "") or reward.referral.referred_to.email
+
                 reward_list.append({
                     "id": reward.id,
                     "points": reward.points_awarded,
@@ -1974,17 +2005,19 @@ class RewardsView(APIView):
                     "status": reward.status,
                     "referral_status": reward.referral.status,
                     "company_name": company_name,
-                    "industry": reward.referral.company.business_info.industry if hasattr(reward.referral.company, 'business_info') else "",
-                    "referred_to_name": reward.referral.referred_to.full_name or reward.referral.referred_to.email,
+                    "company_type": company_type,
+                    "industry": industry,
+                    "avg_rating": avg_rating,
+                    "company_image": company_image,
+                    "referred_to_name": referred_to_name,
                     "date": reward.awarded_at.strftime("%d %b %Y") if reward.awarded_at else None,
                     "withdrawal_status": reward.withdrawal_status,
                     "is_withdrawable": reward.status == "completed" and not reward.withdrawal_status,
                 })
-            
-            # Separate rewards by status for frontend
+
             pending_rewards = [r for r in reward_list if r["status"] == "pending"]
             completed_rewards = [r for r in reward_list if r["status"] == "completed"]
-            
+
             return Response(
                 {
                     "message": "Rewards retrieved successfully",
@@ -1995,13 +2028,13 @@ class RewardsView(APIView):
                         "total_amount_pending": round(total_amount_pending, 2),
                         "total_rewards": len(reward_list),
                         "completed_count": len(completed_rewards),
-                        "pending_count": len(pending_rewards)
+                        "pending_count": len(pending_rewards),
                     },
                     "rewards": {
                         "all": reward_list,
                         "completed": completed_rewards,
-                        "pending": pending_rewards
-                    }
+                        "pending": pending_rewards,
+                    },
                 },
                 status=status.HTTP_200_OK,
             )
@@ -2011,6 +2044,7 @@ class RewardsView(APIView):
                 {"error": f"Failed to retrieve rewards: {str(e)}"},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
+
 
 
 

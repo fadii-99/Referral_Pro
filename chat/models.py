@@ -90,12 +90,12 @@ class ChatRoom(models.Model):
         if viewer == self.solo_user:
             if hasattr(self.company_user, "business_info"):
                 if not self.company_user.business_info.company_name:
-                    return self.company_user.full_name + f" #{self.referral.reference_id}"
-                return self.company_user.business_info.company_name + f" #{self.referral.reference_id}"
-            return self.company_user.full_name
+                    return self.company_user.full_name + f" (#{self.referral.reference_id})"
+                return self.company_user.business_info.company_name + f" (#{self.referral.reference_id})"
+            return self.company_user.full_name  + f" (#{self.referral.reference_id})"
         elif viewer == self.rep_user or viewer == self.company_user:
             # Rep or company sees solo user name
-            return self.solo_user.full_name + f" #{self.referral.reference_id}"
+            return self.solo_user.full_name + f" (#{self.referral.reference_id})"
         else:
             return "Unknown"
     
