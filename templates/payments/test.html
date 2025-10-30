@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html>
+<head>
+	<meta charset="utf-8" />
+	<title>Payments Test</title>
+	<meta name="viewport" content="width=device-width, initial-scale=1" />
+	<style>
+		body { font-family: system-ui, Arial, sans-serif; padding: 24px; }
+		.grid { display: grid; grid-template-columns: repeat(auto-fit,minmax(280px,1fr)); gap: 16px; }
+		.card { border: 1px solid #ddd; padding: 16px; border-radius: 8px; }
+		label { display:block; font-size: 12px; color:#555; margin-top:8px; }
+		input { width: 100%; padding: 8px; margin-top: 4px; }
+		button { margin-top: 12px; padding: 8px 12px; cursor: pointer; }
+		.small { font-size: 12px; color:#666; }
+	</style>
+</head>
+<body>
+	<h2>Stripe Connect OAuth + Withdrawal Test</h2>
+	<div class="grid">
+		<div class="card">
+			<h3>Connect Company (ABC)</h3>
+			<label>Company User ID</label>
+			<input id="company_id" placeholder="e.g. 2" />
+			<button onclick="connect('company')">Connect with Stripe</button>
+			<p class="small">Redirects to Stripe OAuth; on return, saves account to user.stripe_account_id</p>
+		</div>
+		<div class="card">
+			<h3>Connect Recipient (x)</h3>
+			<label>User ID</label>
+			<input id="user_id" placeholder="e.g. 5" />
+			<button onclick="connect('user')">Connect with Stripe</button>
+			<p class="small">Use Account Link after OAuth if requirements still due.</p>
+		</div>
+		<div class="card">
+			<h3>Create Account Link (Express)</h3>
+			<label>User ID</label>
+			<input id="alink_user_id" placeholder="user id" />
+			<button onclick="createAccountLink()">Open Onboarding</button>
+		</div>
+		<div class="card">
+			<h3>Create Withdrawal</h3>
+			<label>Org (ABC) ID</label>
+			<input id="w_org_id" />
+			<label>User (x) ID</label>
+			<input id="w_user_id" />
+			<label>Amount cents</label>
+			<input id="w_amount" value="500" />
+			<button onclick="createWithdrawal()">Withdraw</button>
+			<pre id="w_out" class="small"></pre>
+		</div>
+	</div>
+
+	<script>
+		function connect(role){
+			const userId = role==='company' ? document.getElementById('company_id').value : document.getElementById('user_id').value;
+			if(!userId){ alert('enter user id'); return; }
+			const url = `/payments/connect/stripe/start/?role=${encodeURIComponent(role)}&user_id=${encodeURIComponent(userId)}`;
+			location.href = url;
+		}
+		function createAccountLink(){
+			const id = document.getElementById('alink_user_id').value;
+			if(!id){ alert('enter user id'); return; }
+			location.href = `/payments/account_links/create/?user_id=${encodeURIComponent(id)}`;
+		}
+		async function createWithdrawal(){
+			const orgId = document.getElementById('w_org_id').value;
+			const userId = document.getElementById('w_user_id').value;
+			const amount = document.getElementById('w_amount').value;
+			const res = await fetch('/payments/withdrawals/',{
+				method:'POST', headers:{'Content-Type':'application/json'},
+				body: JSON.stringify({org_id: orgId, user_id: userId, amount_cents: Number(amount)})
+			});
+			document.getElementById('w_out').textContent = await res.text();
+		}
+	</script>
+</body>
+</html>

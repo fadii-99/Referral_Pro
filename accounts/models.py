@@ -57,6 +57,10 @@ class User(AbstractBaseUser, PermissionsMixin):
     role = models.CharField(max_length=20, choices=ROLE_CHOICES, default="solo")
     social_platform = models.CharField(max_length=20, blank=True, null=True)
     referral_code = models.CharField(max_length=20, null=True, blank=True, editable=False)
+    stripe_account_id = models.CharField(max_length=64, null=True, blank=True)
+    stripe_payouts_enabled = models.BooleanField(default=False)
+    # optional: store last onboarding state
+    stripe_requirements_due = models.JSONField(null=True, blank=True)
 
     parent_company = models.ForeignKey(
         "self",

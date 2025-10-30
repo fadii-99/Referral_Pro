@@ -46,6 +46,7 @@ INSTALLED_APPS = [
     'chat',
     'super',
     "activity",
+    'payments',
 ]
 
 FCM_SERVER_KEY = os.getenv("FCM_SERVER_KEY")
@@ -213,8 +214,10 @@ TWILIO_PHONE_NUMBER = os.getenv("TWILIO_PHONE_NUMBER")
 # -------------------------
 STRIPE_PUBLISHABLE_KEY = os.getenv("STRIPE_PUBLISHABLE_KEY")
 STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY")
-
-
+STRIPE_CONNECT_REFRESH_URL = "http://127.0.0.1:8000/stripe/refresh"
+STRIPE_CONNECT_RETURN_URL  = "http://127.0.0.1:8000/stripe/return"
+STRIPE_CONNECT_CLIENT_ID = os.getenv('STRIPE_CONNECT_CLIENT_ID')
+STRIPE_WEBHOOK_SECRET = os.getenv('STRIPE_WEBHOOK_SECRET')
 # -------------------------
 # Social Authentication
 # -------------------------

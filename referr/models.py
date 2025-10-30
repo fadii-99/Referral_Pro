@@ -155,6 +155,7 @@ class ReferralReward(models.Model):
         related_name="referral_rewards"
     )
     points_awarded = models.IntegerField(default=100)
+    redeemed = models.BooleanField(default=False)
     reason = models.CharField(max_length=255)
     status = models.CharField(max_length=50, default="pending")
     withdrawal_status = models.BooleanField(default=False)
